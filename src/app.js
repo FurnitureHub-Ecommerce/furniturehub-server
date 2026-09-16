@@ -2,9 +2,9 @@ const express = require("express");
 
 
 const categoryRoute = require("./routes/category.route");
-const testRoute = require("./routes/test.route");
 const authRoute = require("./routes/auth.route");
-
+const brandRoute = require("./routes/brand.route");
+const productRoute = require("./routes/product.route");
 const app = express();
 
 
@@ -17,9 +17,9 @@ app.get("/", (req, res) => {
 });
 
 app.use("/api/auth", authRoute);
-app.use("/api/test", testRoute);
 app.use("/api/categories", categoryRoute);
-
+app.use("/api/brands", brandRoute);
+app.use("/api/products", productRoute);
 
 
 module.exports = app;
