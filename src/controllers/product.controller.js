@@ -42,23 +42,30 @@ const handleError = (res, error) => {
 /**
  * Bước 3: Lấy danh sách Product công khai.
  *
- * - Gọi Service với isAdmin = false.
- * - Chỉ nhận các Product đang hoạt động.
- * - Trả về danh sách và HTTP 200.
- * - Nếu lỗi, chuyển sang hàm handleError.
+ * - Nhận các tham số tìm kiếm từ req.query.
+ * - Gọi Service xử lý tìm kiếm và lọc sản phẩm.
+ * - Nhận danh sách và thông tin phân trang.
+ * - Trả về dữ liệu với HTTP 200.
+ * - Nếu có lỗi, chuyển sang hàm handleError.
  */
 const getAll = async (req, res) => {
   try {
-    const products = await productService.getAll();
 
+    // Gửi query parameters cho Service xử lý.
+    const result = await productService.getCatalog(
+      req.query
+    );
+
+    // Trả về danh sách và thông tin phân trang.
     return res.status(200).json({
-      products,
+      products: result.products,
+      pagination: result.pagination,
     });
+
   } catch (error) {
     return handleError(res, error);
   }
 };
-
 /**
  * Bước 4: Lấy danh sách Product dành cho Admin.
  *
@@ -169,7 +176,7 @@ const remove = async (req, res) => {
   }
 };
 
-// Bước 9: Export các hàm cho Route.
+
 module.exports = {
   getAll,
   getAllAdmin,

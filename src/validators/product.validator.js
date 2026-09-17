@@ -57,8 +57,67 @@ const updateProductSchema = createProductSchema
     "At least one field is required"
   );
 
-// Bước 5: Export schema.
+  
+/**
+ * Bước 6: Kiểm tra query parameters khi lấy danh sách sản phẩm.
+ *
+ * - search: từ khóa tìm kiếm.
+ * - categoryId: lọc theo danh mục.
+ * - brandId: lọc theo thương hiệu.
+ * - minPrice, maxPrice: khoảng giá.
+ * - sort: kiểu sắp xếp.
+ * - page: trang hiện tại, bắt đầu từ 1.
+ * - limit: số sản phẩm mỗi trang, tối đa 100.
+ *
+ * Dữ liệu từ URL có dạng chuỗi nên cần chuyển
+ * các tham số số thành Number trước khi sử dụng.
+ */
+
+const productQuerySchema = z.object({
+  search: z.string().trim().optional(),
+
+  categoryId: objectIdSchema.optional(),
+
+  brandId: objectIdSchema.optional(),
+
+  minPrice: z.coerce.number().finite().min(0).optional(),
+
+  maxPrice: z.coerce.number().finite().min(0).optional(),
+
+  sort: z.enum([
+    "newest",
+    "oldest",
+    "name_asc",
+    "name_desc",
+    "price_asc",
+    "price_desc",
+  ]).default("newest"),
+
+  page: z.coerce.number()
+    .int()
+    .min(1)
+    .default(1),
+
+  limit: z.coerce.number()
+    .int()
+    .min(1)
+    .max(100)
+    .default(10),
+
+}).strict().refine(
+  (data) =>
+    data.minPrice === undefined ||
+    data.maxPrice === undefined ||
+    data.minPrice <= data.maxPrice,
+  {
+    message: "minPrice must be less than or equal to maxPrice",
+    path: ["maxPrice"],
+  }
+);
+
+// Export schema.
 module.exports = {
   createProductSchema,
   updateProductSchema,
+  productQuerySchema,
 };

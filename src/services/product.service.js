@@ -193,13 +193,146 @@ const remove = async (id) => {
   });
 };
 
+const {
+  productQuerySchema,
+} = require("../validators/product.validator");
+
+
 /**
- * Bước 10: Export các hàm nghiệp vụ.
+ * Bước 11: Xử lý tìm kiếm và phân trang Product.
+ *
+ * - Kiểm tra query parameters bằng Zod.
+ * - Xây dựng điều kiện tìm kiếm.
+ * - Xây dựng điều kiện lọc giá.
+ * - Xác định kiểu sắp xếp.
+ * - Gọi Repository để truy vấn.
+ * - Tính tổng số trang.
+ * - Trả về danh sách và thông tin phân trang.
  */
+const getCatalog = async (query = {}) => {
+
+  // Bước 1: Kiểm tra dữ liệu đầu vào.
+  const result = productQuerySchema.safeParse(query);
+
+  if (!result.success) {
+    throw makeError(
+      result.error.issues
+        .map((issue) => issue.message)
+        .join(", "),
+      400
+    );
+  }
+
+  // Bước 2: Lấy các tham số đã được kiểm tra.
+  const {
+    search,
+    categoryId,
+    brandId,
+    minPrice,
+    maxPrice,
+    sort,
+    page,
+    limit,
+  } = result.data;
+
+  // Bước 3: Chỉ lấy sản phẩm đang hoạt động.
+  const filter = {
+    isActive: true,
+  };
+
+  // Bước 4: Tìm kiếm theo tên sản phẩm.
+  // Escape các ký tự đặc biệt để tránh chúng
+  // bị hiểu thành biểu thức chính quy.
+  if (search) {
+    const escapedSearch = search.replace(
+      /[.*+?^${}()|[\]\\]/g,
+      "\\$&"
+    );
+
+    filter.name = {
+      $regex: escapedSearch,
+      $options: "i",
+    };
+  }
+
+  // Bước 5: Lọc theo danh mục.
+  if (categoryId) {
+    filter.categoryId = new mongoose.Types.ObjectId(
+      categoryId
+    );
+  }
+
+  // Bước 6: Lọc theo thương hiệu.
+  if (brandId) {
+    filter.brandId = new mongoose.Types.ObjectId(
+      brandId
+    );
+  }
+
+  // Bước 7: Xây dựng điều kiện lọc giá.
+  const priceFilter = {};
+
+  if (minPrice !== undefined) {
+    priceFilter.$gte = minPrice;
+  }
+
+  if (maxPrice !== undefined) {
+    priceFilter.$lte = maxPrice;
+  }
+
+  // Bước 8: Xác định kiểu sắp xếp.
+  const sortOptions = {
+    newest: {
+      createdAt: -1,
+    },
+    oldest: {
+      createdAt: 1,
+    },
+    name_asc: {
+      name: 1,
+    },
+    name_desc: {
+      name: -1,
+    },
+    price_asc: {
+      minPrice: 1,
+    },
+    price_desc: {
+      minPrice: -1,
+    },
+  };
+
+  // Bước 9: Gọi Repository để lấy dữ liệu.
+  const { products, totalItems } =
+    await productRepository.searchCatalog({
+      filter,
+      priceFilter,
+      sort: sortOptions[sort],
+      page,
+      limit,
+    });
+
+  // Bước 10: Tính tổng số trang.
+  const totalPages = Math.ceil(totalItems / limit);
+
+  // Bước 11: Trả về kết quả cho Controller.
+  return {
+    products,
+
+    pagination: {
+      page,
+      limit,
+      totalItems,
+      totalPages,
+    },
+  };
+};
+
 module.exports = {
   getAll,
   getById,
   create,
   update,
   remove,
+  getCatalog,
 };
