@@ -29,8 +29,7 @@ const definition = {
   info: {
     title: "FurnitureHub API",
     version: "1.0.0",
-    description:
-      "Tài liệu API FurnitureHub - SDN302 & MMA301",
+    description: "Tài liệu API FurnitureHub - SDN302 & MMA301",
   },
 
   // Sử dụng cùng origin với trang Swagger.
@@ -189,6 +188,7 @@ const definition = {
     { name: "Brand", description: "Quản lý thương hiệu" },
     { name: "Product", description: "Quản lý sản phẩm" },
     { name: "Variant", description: "Quản lý biến thể và SKU" },
+    { name: "Wishlist", description: "Quản lý danh sách yêu thích" },
   ],
 };
 
@@ -198,20 +198,21 @@ const definition = {
  * Bước 1: Nhận tên Schema.
  * Bước 2: Tham chiếu đến Schema đã định nghĩa.
  * Bước 3: Trả về cấu hình JSON request body.
+ * Với PATCH, các trường đều tùy chọn nhưng body phải có ít nhất một trường.
  */
-const requestBody = (schemaName, isUpdate = false) => ({
+const requestBody = (schemaName, isUpdate = false, updateFields = {}) => ({
   required: true,
   content: {
     "application/json": {
       schema: isUpdate
         ? {
-            allOf: [
-              {
-                $ref: `#/components/schemas/${schemaName}`,
-              },
-            ],
-            required: [],
+            type: "object",
+            properties: {
+              ...definition.components.schemas[schemaName].properties,
+              ...updateFields,
+            },
             minProperties: 1,
+            additionalProperties: false,
           }
         : {
             $ref: `#/components/schemas/${schemaName}`,
@@ -456,7 +457,9 @@ definition.paths = {
       summary: "Admin cập nhật Product",
       secured: true,
       params: [idParam()],
-      body: requestBody("Product", true),
+      body: requestBody("Product", true, {
+        isActive: { type: "boolean" },
+      }),
       description: "Có thể cập nhật isActive để kích hoạt lại Product.",
     }),
 
@@ -509,7 +512,9 @@ definition.paths = {
       summary: "Admin cập nhật Variant và SKU",
       secured: true,
       params: [idParam()],
-      body: requestBody("Variant", true),
+      body: requestBody("Variant", true, {
+        isActive: { type: "boolean" },
+      }),
     }),
 
     delete: api({
@@ -519,8 +524,61 @@ definition.paths = {
       params: [idParam()],
     }),
   },
-};
+  // ================= WISHLIST =================
 
+  /**
+   * Mục đích:
+   * Khai báo tài liệu API quản lý danh sách yêu thích.
+   *
+   * GET: Customer lấy danh sách yêu thích.
+   * POST: Customer thêm sản phẩm vào Wishlist.
+   * DELETE: Customer xóa sản phẩm khỏi Wishlist.
+   *
+   * Cả ba API đều yêu cầu JWT.
+   */
+  "/api/wishlist": {
+    get: api({
+      tag: "Wishlist",
+      summary: "Customer xem danh sách yêu thích",
+      secured: true,
+      description: "Lấy Wishlist của Customer đang đăng nhập.",
+    }),
+
+    post: api({
+      tag: "Wishlist",
+      summary: "Customer thêm sản phẩm yêu thích",
+      secured: true,
+      success: 201,
+      body: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["productId"],
+              properties: {
+                productId: {
+                  type: "string",
+                  pattern: "^[0-9a-fA-F]{24}$",
+                  description: "ID của sản phẩm cần yêu thích",
+                },
+              },
+            },
+          },
+        },
+      },
+    }),
+  },
+
+  "/api/wishlist/{productId}": {
+    delete: api({
+      tag: "Wishlist",
+      summary: "Customer xóa sản phẩm yêu thích",
+      secured: true,
+      params: [idParam("productId")],
+    }),
+  },
+};
 // Bước 9: Tạo tài liệu OpenAPI từ cấu hình.
 const swaggerSpec = swaggerJsdoc({
   definition,
