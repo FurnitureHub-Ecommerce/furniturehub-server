@@ -184,6 +184,7 @@ const definition = {
 
   tags: [
     { name: "Auth", description: "Xác thực người dùng" },
+    { name: "Cart", description: "Quản lý giỏ hàng" },
     { name: "Category", description: "Quản lý danh mục" },
     { name: "Brand", description: "Quản lý thương hiệu" },
     { name: "Product", description: "Quản lý sản phẩm" },
@@ -576,6 +577,142 @@ definition.paths = {
       summary: "Customer xóa sản phẩm yêu thích",
       secured: true,
       params: [idParam("productId")],
+    }),
+  },
+
+  // ================= CART =================
+
+  "/api/cart": {
+    /*
+     * GET /api/cart
+     * Lấy giỏ hàng của CUSTOMER đang đăng nhập.
+     * Trả về danh sách items với itemSubtotal từng dòng,
+     * totalQuantity và totalAmount toàn giỏ.
+     * Nếu chưa có item nào, trả về cấu trúc rỗng.
+     */
+    get: api({
+      tag: "Cart",
+      summary: "Customer xem giỏ hàng",
+      secured: true,
+      description:
+        "Lấy giỏ hàng hiện tại của Customer. " +
+        "Backend tự tính itemSubtotal, totalQuantity, totalAmount.",
+    }),
+
+    /*
+     * DELETE /api/cart
+     * Xóa toàn bộ items trong giỏ hàng.
+     * Không xóa Cart document, chỉ làm rỗng mảng items.
+     * Idempotent: gọi nhiều lần vẫn trả về thành công.
+     */
+    delete: api({
+      tag: "Cart",
+      summary: "Customer xóa toàn bộ giỏ hàng",
+      secured: true,
+      description:
+        "Làm rỗng giỏ hàng. Không xóa Cart document. " +
+        "Idempotent: gọi khi giỏ đã rỗng vẫn trả 200.",
+    }),
+  },
+
+  "/api/cart/items": {
+    /*
+     * POST /api/cart/items
+     * Thêm sản phẩm vào giỏ hàng.
+     * Nếu Variant đã có trong giỏ, tăng quantity.
+     * Giá lấy từ Backend (variant.price), không nhận từ Frontend.
+     * Kiểm tra tồn kho trước khi thêm.
+     */
+    post: api({
+      tag: "Cart",
+      summary: "Customer thêm sản phẩm vào giỏ hàng",
+      secured: true,
+      success: 201,
+      description:
+        "Thêm Variant vào giỏ hàng. " +
+        "Nếu Variant đã tồn tại, tăng quantity thay vì tạo item mới. " +
+        "Giá luôn lấy từ Backend. " +
+        "Không làm giảm Inventory.",
+      body: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["variantId", "quantity"],
+              properties: {
+                variantId: {
+                  type: "string",
+                  pattern: "^[0-9a-fA-F]{24}$",
+                  description: "ID của ProductVariant cần thêm vào giỏ",
+                  example: "507f1f77bcf86cd799439011",
+                },
+                quantity: {
+                  type: "integer",
+                  minimum: 1,
+                  description: "Số lượng cần thêm, phải là số nguyên dương",
+                  example: 2,
+                },
+              },
+            },
+          },
+        },
+      },
+    }),
+  },
+
+  "/api/cart/items/{itemId}": {
+    /*
+     * PATCH /api/cart/items/:itemId
+     * Cập nhật số lượng một CartItem.
+     * itemId là _id của CartItem (subdocument) trong mảng items.
+     * Kiểm tra tồn kho với quantity mới trước khi cập nhật.
+     */
+    patch: api({
+      tag: "Cart",
+      summary: "Customer cập nhật số lượng CartItem",
+      secured: true,
+      params: [idParam("itemId")],
+      description:
+        "Cập nhật quantity của một item trong giỏ hàng. " +
+        "itemId là _id của CartItem lấy từ GET /api/cart. " +
+        "Kiểm tra tồn kho với quantity mới.",
+      body: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["quantity"],
+              properties: {
+                quantity: {
+                  type: "integer",
+                  minimum: 1,
+                  description: "Số lượng mới, phải là số nguyên dương",
+                  example: 3,
+                },
+              },
+            },
+          },
+        },
+      },
+    }),
+
+    /*
+     * DELETE /api/cart/items/:itemId
+     * Xóa một CartItem khỏi giỏ hàng.
+     * itemId là _id của CartItem (subdocument).
+     * Không ảnh hưởng Inventory.
+     */
+    delete: api({
+      tag: "Cart",
+      summary: "Customer xóa một CartItem",
+      secured: true,
+      params: [idParam("itemId")],
+      description:
+        "Xóa một item khỏi giỏ hàng theo itemId. " +
+        "itemId là _id của CartItem lấy từ GET /api/cart. " +
+        "Không ảnh hưởng Inventory.",
     }),
   },
 };
