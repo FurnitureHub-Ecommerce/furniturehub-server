@@ -12,6 +12,7 @@
  * Bước 6: Khai báo Category và Brand API.
  * Bước 7: Khai báo Product API.
  * Bước 8: Khai báo ProductVariant/SKU API.
+ * Bước 8a: Khai báo kiểm tra checkout và các phản hồi cụ thể.
  * Bước 9: Tạo Swagger Specification.
  * Bước 10: Export cấu hình để app.js sử dụng.
  *
@@ -54,6 +55,78 @@ const definition = {
 
     // Bước 4: Schema dùng chung.
     schemas: {
+      CheckoutInput: {
+        type: "object",
+        required: ["addressId"],
+        additionalProperties: false,
+        properties: {
+          addressId: {
+            type: "string",
+            pattern: "^[0-9a-fA-F]{24}$",
+            description: "Địa chỉ giao hàng thuộc Customer đang đăng nhập",
+            example: "507f1f77bcf86cd799439011",
+          },
+        },
+      },
+      CheckoutResult: {
+        type: "object",
+        required: ["message", "valid"],
+        properties: {
+          message: { type: "string", example: "Cart is valid for checkout" },
+          valid: { type: "boolean", enum: [true] },
+        },
+      },
+      CheckoutError: {
+        type: "object",
+        required: ["message"],
+        properties: {
+          message: { type: "string" },
+          valid: {
+            type: "boolean",
+            enum: [false],
+            description: "Chỉ có khi kiểm tra nghiệp vụ giỏ hàng thất bại",
+          },
+          errors: {
+            type: "array",
+            description:
+              "Lỗi body giữ nguyên cấu trúc Zod issues. Lỗi CartItem có itemId, " +
+              "variantId, code và message; một item có thể có nhiều lỗi.",
+            items: {
+              oneOf: [
+                {
+                  type: "object",
+                  required: ["itemId", "variantId", "code", "message"],
+                  properties: {
+                    itemId: { type: "string", nullable: true },
+                    variantId: {
+                      type: "string",
+                      nullable: true,
+                      description: "null khi không populate được Variant; dùng itemId để xác định dòng lỗi",
+                    },
+                    code: {
+                      type: "string",
+                      enum: ["INVALID_QUANTITY", "VARIANT_NOT_FOUND", "VARIANT_INACTIVE", "PRODUCT_NOT_FOUND", "PRODUCT_INACTIVE"],
+                    },
+                    message: { type: "string" },
+                  },
+                },
+                {
+                  type: "object",
+                  required: ["code", "path", "message"],
+                  properties: {
+                    code: { type: "string" },
+                    message: { type: "string" },
+                    path: {
+                      type: "array",
+                      items: { oneOf: [{ type: "string" }, { type: "integer" }] },
+                    },
+                  },
+                },
+              ],
+            },
+          },
+        },
+      },
       Register: {
         type: "object",
         required: ["fullName", "email", "password"],
@@ -226,6 +299,7 @@ const definition = {
     { name: "Address", description: "Quản lý địa chỉ giao hàng" },
     { name: "Auth", description: "Xác thực người dùng" },
     { name: "Cart", description: "Quản lý giỏ hàng" },
+    { name: "Checkout", description: "Kiểm tra điều kiện checkout" },
     { name: "Category", description: "Quản lý danh mục" },
     { name: "Brand", description: "Quản lý thương hiệu" },
     { name: "Product", description: "Quản lý sản phẩm" },
@@ -344,7 +418,83 @@ const api = ({
  * API quản lý dữ liệu yêu cầu Bearer Token ADMIN.
  * API đọc công khai không yêu cầu đăng nhập.
  */
+/**
+ * Mục đích: mô tả response JSON cụ thể của Checkout, dùng các schema ở trên.
+ * Đầu vào: mô tả mã HTTP, tên schema và các ví dụ theo từng trường hợp lỗi.
+ * Bước 1: Gắn kiểu nội dung JSON và tham chiếu schema.
+ * Bước 2: Gắn ví dụ để Swagger UI hiển thị được response mong đợi.
+ * Bước 3: Trả cấu hình; không sửa helper api hoặc tài liệu endpoint trước đó.
+ */
+const checkoutResponse = (description, schemaName, examples) => ({
+  description,
+  content: {
+    "application/json": {
+      schema: { $ref: `#/components/schemas/${schemaName}` },
+      examples,
+    },
+  },
+});
+
 definition.paths = {
+  // Kiểm tra checkout chỉ đọc dữ liệu của Customer đang đăng nhập.
+  "/api/checkout/validate": {
+    post: {
+      tags: ["Checkout"],
+      summary: "Customer kiểm tra địa chỉ và giỏ hàng trước checkout",
+      description:
+        "Chỉ CUSTOMER được gọi. Body chỉ nhận addressId, userId lấy từ JWT. " +
+        "Kiểm tra quyền sở hữu địa chỉ, Cart không rỗng, quantity là số nguyên >= 1, " +
+        "Variant và Product tồn tại, có isActive=true. Lỗi Cart trả 400; " +
+        "địa chỉ không tồn tại hoặc thuộc người khác cùng trả 404. " +
+        "Chỉ đọc dữ liệu, không tạo hay sửa Cart/Address, không tính giá hoặc kiểm tra " +
+        "tồn kho chi tiết (Task 3), không tạo Order (Task 4) hay Payment (Task 5). " +
+        "Kết quả chỉ phản ánh thời điểm gọi API, không giữ hàng hoặc bảo đảm giá/tồn kho. " +
+        "Phải kiểm tra lại điều kiện quan trọng tại thời điểm tạo đơn.",
+      security: [{ bearerAuth: [] }],
+      requestBody: requestBody("CheckoutInput"),
+      responses: {
+        200: checkoutResponse("Cart đủ điều kiện tiếp tục checkout", "CheckoutResult", {
+          valid: { value: { message: "Cart is valid for checkout", valid: true } },
+        }),
+        400: checkoutResponse("Body hoặc giỏ hàng không hợp lệ", "CheckoutError", {
+          invalidAddressId: {
+            value: {
+              message: "Validation failed",
+              errors: [{ code: "invalid_format", path: ["addressId"], message: "Invalid address ID", format: "regex", pattern: "/^[a-fA-F0-9]{24}$/" }],
+            },
+          },
+          forbiddenField: {
+            value: {
+              message: "Validation failed",
+              errors: [{ code: "unrecognized_keys", keys: ["userId"], path: [], message: 'Unrecognized key: "userId"' }],
+            },
+          },
+          missingCart: { value: { message: "Cart not found", valid: false } },
+          emptyCart: { value: { message: "Cart is empty", valid: false } },
+          invalidItem: {
+            value: {
+              message: "Cart is invalid for checkout",
+              valid: false,
+              errors: [{ itemId: "507f1f77bcf86cd799439012", variantId: null, code: "VARIANT_NOT_FOUND", message: "Product variant not found" }],
+            },
+          },
+        }),
+        401: checkoutResponse("Thiếu JWT hoặc JWT không hợp lệ/hết hạn", "CheckoutError", {
+          missingToken: { value: { message: "Access token is required" } },
+          invalidToken: { value: { message: "Invalid or expired token" } },
+        }),
+        403: checkoutResponse("Role không phải CUSTOMER", "CheckoutError", {
+          forbidden: { value: { message: "Forbidden: insufficient permission" } },
+        }),
+        404: checkoutResponse("Địa chỉ không tồn tại hoặc không thuộc Customer", "CheckoutError", {
+          addressNotFound: { value: { message: "Không tìm thấy địa chỉ" } },
+        }),
+        500: checkoutResponse("Lỗi hệ thống, không trả chi tiết nội bộ", "CheckoutError", {
+          serverError: { value: { message: "Internal server error" } },
+        }),
+      },
+    },
+  },
   // ================= ADDRESS =================
 
   /**
