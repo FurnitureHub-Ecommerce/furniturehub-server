@@ -31,6 +31,9 @@ const cartRoute = require("./routes/cart.route");
 // Import Router quản lý Address.
 const addressRoute = require("./routes/address.route");
 
+// Import Router kiểm tra điều kiện checkout.
+const checkoutRoute = require("./routes/checkout.route");
+
 // Import hai Router quản lý ProductVariant.
 // File productVariant.route.js đang export hai Router riêng.
 const {
@@ -122,6 +125,9 @@ app.use("/api/cart", cartRoute);
 
 // Address dành cho Customer.
 app.use("/api/addresses", addressRoute);
+
+// Kiểm tra địa chỉ và giỏ hàng trước khi Customer tiếp tục checkout.
+app.use("/api/checkout", checkoutRoute);
 
 /**
  * ProductVariant.

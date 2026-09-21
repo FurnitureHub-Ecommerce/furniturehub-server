@@ -37,16 +37,25 @@ const Inventory = require("../models/Inventory.model");
  * - Thông tin Product qua productId: name, images, isActive.
  *
  * Không populate userId vì Controller đã có userId từ JWT.
+ * Tùy chọn lean dành cho Checkout: giữ nguyên kiểu quantity từ database,
+ * không áp dụng ép kiểu hoặc giá trị mặc định của Mongoose khi kiểm tra.
+ * Khi lean=true, tham chiếu sai định dạng được bỏ qua lúc populate và trở
+ * thành null để Service báo lỗi từng item thay vì phát sinh CastError 500.
+ * Mặc định vẫn trả Mongoose document, giữ nguyên hành vi của Cart API.
  */
-const findByUserId = async (userId) => {
-  return Cart.findOne({ userId }).populate({
+const findByUserId = async (userId, { lean = false } = {}) => {
+  const query = Cart.findOne({ userId }).populate({
     path: "items.variantId",
     select: "sku color size material price isActive productId",
+    skipInvalidIds: lean,
     populate: {
       path: "productId",
       select: "name images isActive",
+      skipInvalidIds: lean,
     },
   });
+
+  return lean ? query.lean() : query;
 };
 
 /**
