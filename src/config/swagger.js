@@ -70,10 +70,33 @@ const definition = {
       },
       CheckoutResult: {
         type: "object",
-        required: ["message", "valid"],
+        required: ["message", "valid", "items", "totalAmount"],
         properties: {
           message: { type: "string", example: "Cart is valid for checkout" },
           valid: { type: "boolean", enum: [true] },
+          items: { type: "array", items: { $ref: "#/components/schemas/CheckoutStockPriceItem" } },
+          totalAmount: {
+            type: "number", minimum: 0,
+            description: "Tổng các itemSubtotal theo giá hiện tại; cũng là subtotal, không phí vận chuyển, thuế hay giảm giá",
+          },
+        },
+      },
+      CheckoutStockPriceItem: {
+        type: "object",
+        required: ["itemId", "variantId", "quantity", "requestedQuantity", "availableStock", "unitPrice", "itemSubtotal", "stockValid", "valid"],
+        properties: {
+          itemId: { type: "string", nullable: true },
+          variantId: { type: "string", nullable: true },
+          quantity: {
+            nullable: true,
+            description: "Số lượng lưu trong Cart; giữ giá trị sai kiểu để chẩn đoán khi valid=false",
+          },
+          requestedQuantity: { type: "integer", nullable: true, description: "Tổng quantity hợp lệ của mọi dòng cùng Variant; null nếu thiếu Variant hoặc vượt giới hạn" },
+          availableStock: { type: "integer", nullable: true, minimum: 0, description: "Inventory.quantity; null nếu bản ghi thiếu hoặc sai dữ liệu" },
+          unitPrice: { type: "number", nullable: true, minimum: 0, description: "ProductVariant.price hiện tại; null nếu giá không hợp lệ" },
+          itemSubtotal: { type: "number", nullable: true, minimum: 0, description: "unitPrice nhân quantity; khi dòng lỗi chỉ có giá trị chẩn đoán" },
+          stockValid: { type: "boolean", description: "Kết quả so sánh tồn kho; không thay thế valid của dòng hoặc toàn giỏ" },
+          valid: { type: "boolean" },
         },
       },
       CheckoutError: {
@@ -86,6 +109,8 @@ const definition = {
             enum: [false],
             description: "Chỉ có khi kiểm tra nghiệp vụ giỏ hàng thất bại",
           },
+          items: { type: "array", items: { $ref: "#/components/schemas/CheckoutStockPriceItem" } },
+          totalAmount: { type: "number", nullable: true, description: "Luôn null nếu Cart có lỗi; không trả tổng một phần như tổng đã xác nhận" },
           errors: {
             type: "array",
             description:
@@ -105,8 +130,16 @@ const definition = {
                     },
                     code: {
                       type: "string",
-                      enum: ["INVALID_QUANTITY", "VARIANT_NOT_FOUND", "VARIANT_INACTIVE", "PRODUCT_NOT_FOUND", "PRODUCT_INACTIVE"],
+                      enum: ["INVALID_QUANTITY", "VARIANT_NOT_FOUND", "VARIANT_INACTIVE", "PRODUCT_NOT_FOUND", "PRODUCT_INACTIVE", "INVENTORY_NOT_FOUND", "INVALID_STOCK", "INSUFFICIENT_STOCK", "INVALID_QUANTITY_TOTAL", "INVALID_PRICE", "INVALID_ITEM_TOTAL"],
                     },
+                    message: { type: "string" },
+                  },
+                },
+                {
+                  type: "object",
+                  required: ["code", "message"],
+                  properties: {
+                    code: { type: "string", enum: ["INVALID_TOTAL"] },
                     message: { type: "string" },
                   },
                 },
@@ -440,21 +473,31 @@ definition.paths = {
   "/api/checkout/validate": {
     post: {
       tags: ["Checkout"],
-      summary: "Customer kiểm tra địa chỉ và giỏ hàng trước checkout",
+      summary: "Customer kiểm tra địa chỉ, giỏ hàng, tồn kho và giá hiện tại",
       description:
         "Chỉ CUSTOMER được gọi. Body chỉ nhận addressId, userId lấy từ JWT. " +
         "Kiểm tra quyền sở hữu địa chỉ, Cart không rỗng, quantity là số nguyên >= 1, " +
         "Variant và Product tồn tại, có isActive=true. Lỗi Cart trả 400; " +
         "địa chỉ không tồn tại hoặc thuộc người khác cùng trả 404. " +
-        "Chỉ đọc dữ liệu, không tạo hay sửa Cart/Address, không tính giá hoặc kiểm tra " +
-        "tồn kho chi tiết (Task 3), không tạo Order (Task 4) hay Payment (Task 5). " +
+        "Gộp quantity các dòng trùng Variant rồi so với Inventory.quantity của một kho. " +
+        "Giá lấy từ ProductVariant.price, không dùng hay cập nhật snapshot CartItem.unitPrice. " +
+        "totalAmount là tổng itemSubtotal, không thêm phí vận chuyển, thuế, coupon hoặc giảm giá. " +
+        "Giữ giá thập phân theo schema; nhân/cộng chính xác, từ chối kết quả không biểu diễn an toàn bằng Number. " +
+        "Cart API vẫn giữ hợp đồng snapshot và làm tròn VND như trước. " +
+        "Thiếu Inventory, thiếu hàng, giá hoặc số lượng lỗi đều trả 400, valid=false; " +
+        "items chỉ là chẩn đoán và totalAmount=null. Không có Cart/giỏ rỗng không trả items hay tổng. " +
+        "Chỉ đọc dữ liệu, không tạo hay sửa Cart/Address/Inventory, không tạo Order hay Payment. " +
         "Kết quả chỉ phản ánh thời điểm gọi API, không giữ hàng hoặc bảo đảm giá/tồn kho. " +
         "Phải kiểm tra lại điều kiện quan trọng tại thời điểm tạo đơn.",
       security: [{ bearerAuth: [] }],
       requestBody: requestBody("CheckoutInput"),
       responses: {
         200: checkoutResponse("Cart đủ điều kiện tiếp tục checkout", "CheckoutResult", {
-          valid: { value: { message: "Cart is valid for checkout", valid: true } },
+          valid: { value: {
+            message: "Cart is valid for checkout", valid: true,
+            items: [{ itemId: "507f1f77bcf86cd799439012", variantId: "507f1f77bcf86cd799439013", quantity: 2, requestedQuantity: 2, availableStock: 10, unitPrice: 1200000, itemSubtotal: 2400000, stockValid: true, valid: true }],
+            totalAmount: 2400000,
+          } },
         }),
         400: checkoutResponse("Body hoặc giỏ hàng không hợp lệ", "CheckoutError", {
           invalidAddressId: {
@@ -475,9 +518,17 @@ definition.paths = {
             value: {
               message: "Cart is invalid for checkout",
               valid: false,
+              items: [{ itemId: "507f1f77bcf86cd799439012", variantId: null, quantity: 2, requestedQuantity: null, availableStock: null, unitPrice: null, itemSubtotal: null, stockValid: false, valid: false }],
+              totalAmount: null,
               errors: [{ itemId: "507f1f77bcf86cd799439012", variantId: null, code: "VARIANT_NOT_FOUND", message: "Product variant not found" }],
             },
           },
+          insufficientStock: { value: {
+            message: "Cart is invalid for checkout", valid: false,
+            items: [{ itemId: "507f1f77bcf86cd799439012", variantId: "507f1f77bcf86cd799439013", quantity: 5, requestedQuantity: 5, availableStock: 3, unitPrice: 1200000, itemSubtotal: 6000000, stockValid: false, valid: false }],
+            totalAmount: null,
+            errors: [{ itemId: "507f1f77bcf86cd799439012", variantId: "507f1f77bcf86cd799439013", code: "INSUFFICIENT_STOCK", message: "Insufficient stock. Available: 3, Requested total: 5" }],
+          } },
         }),
         401: checkoutResponse("Thiếu JWT hoặc JWT không hợp lệ/hết hạn", "CheckoutError", {
           missingToken: { value: { message: "Access token is required" } },

@@ -2,7 +2,7 @@
   "info": {
     "name": "FurnitureHub - Task 2 Checkout Validation",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "description": "@Author: Minh Truong\n\nMục đích: cung cấp TC01–TC17 cho Checkout Validation.\nBước 1: Đặt biến baseUrl và JWT/ID của môi trường thử nghiệm.\nBước 2: Chuẩn bị dữ liệu theo mô tả từng request và docs/checkout-validation.md.\nBước 3: Chạy từng request rồi kiểm tra Tests.\n\nCác ca cần trạng thái Cart khác nhau; không chạy Collection Runner toàn bộ với cùng Customer mà chưa chuẩn bị lại dữ liệu. Không có script ghi database hoặc tạo đơn. Các response lưu sẵn là kết quả mong đợi, không phải bằng chứng đã chạy."
+    "description": "@Author: Minh Truong\n\nMục đích: cung cấp TC01–TC17 cho Checkout Validation.\nBước 1: Đặt biến baseUrl và JWT/ID của môi trường thử nghiệm.\nBước 2: Chuẩn bị dữ liệu theo mô tả từng request và docs/checkout-validation.md.\nBước 3: Chạy từng request rồi kiểm tra Tests.\n\nCác ca cần trạng thái Cart khác nhau; không chạy Collection Runner toàn bộ với cùng Customer mà chưa chuẩn bị lại dữ liệu. Không có script ghi database hoặc tạo đơn. Các response lưu sẵn là kết quả mong đợi, không phải bằng chứng đã chạy.\n\nCập nhật Task 3: chuẩn bị Inventory đủ hàng và ProductVariant.price hợp lệ. Response có thêm items/totalAmount; ví dụ Task 2 là các trường cần đối chiếu, không phải toàn bộ response hiện tại. Xem docs/stock-price-validation.md để chạy TC01–TC22. Không có thao tác ghi dữ liệu trong endpoint."
   },
   "variable": [
     {
@@ -80,7 +80,7 @@
             }
           }
         },
-        "description": "Chuẩn bị: Cart có ít nhất một item, quantity nguyên >= 1; Variant và Product tồn tại và isActive=true; addressId thuộc Customer.\n\nChạy từng request sau khi chuẩn bị dữ liệu trong docs/checkout-validation.md. Không chạy cả collection với cùng một trạng thái Cart.\n\nHTTP mong đợi: 200. Response mong đợi:\n\n{\n  \"message\": \"Cart is valid for checkout\",\n  \"valid\": true\n}"
+        "description": "Chuẩn bị: Cart có ít nhất một item, quantity nguyên >= 1; Variant và Product tồn tại và isActive=true; addressId thuộc Customer.\n\nChạy từng request sau khi chuẩn bị dữ liệu trong docs/checkout-validation.md. Không chạy cả collection với cùng một trạng thái Cart.\n\nHTTP mong đợi: 200. Các trường Task 2 mong đợi trong response mở rộng:\n\n{\n  \"message\": \"Cart is valid for checkout\",\n  \"valid\": true\n}"
       },
       "event": [
         {
@@ -90,14 +90,15 @@
             "exec": [
               "/**",
               " * @Author: Minh Truong",
-              " * Mục đích: kiểm tra mã HTTP và toàn bộ response của ca thử.",
+              " * Mục đích: kiểm tra mã HTTP và các trường Task 2 trong response mở rộng của ca thử.",
               " * Bước 1: Đọc response JSON.",
               " * Bước 2: Thay biến ID bằng giá trị của dữ liệu thử nghiệm.",
               " * Bước 3: So sánh kết quả; lỗi phải được báo thay vì coi là đạt.",
               " */",
               "pm.test('TC01: HTTP 200', function () { pm.response.to.have.status(200); });",
               "const expected = JSON.parse(pm.variables.replaceIn(\"{\\\"message\\\":\\\"Cart is valid for checkout\\\",\\\"valid\\\":true}\"));",
-              "pm.test('TC01: response đúng hợp đồng', function () { pm.expect(pm.response.json()).to.deep.equal(expected); });"
+              "pm.test('TC01: response đúng hợp đồng', function () { pm.expect(pm.response.json()).to.deep.include(expected); });",
+              "pm.test('Task 3: giá và tồn kho hợp lệ', function () { const body = pm.response.json(); pm.expect(body.totalAmount).to.be.a('number'); pm.expect(body.items).to.be.an('array').that.is.not.empty; body.items.forEach(function (item) { pm.expect(item.valid).to.equal(true); pm.expect(item.stockValid).to.equal(true); pm.expect(item.unitPrice).to.be.a('number'); pm.expect(item.itemSubtotal).to.be.a('number'); }); });"
             ]
           }
         }
@@ -189,7 +190,7 @@
             }
           }
         },
-        "description": "Chuẩn bị: Không cần dữ liệu database; request không có Authorization.\n\nChạy từng request sau khi chuẩn bị dữ liệu trong docs/checkout-validation.md. Không chạy cả collection với cùng một trạng thái Cart.\n\nHTTP mong đợi: 401. Response mong đợi:\n\n{\n  \"message\": \"Access token is required\"\n}"
+        "description": "Chuẩn bị: Không cần dữ liệu database; request không có Authorization.\n\nChạy từng request sau khi chuẩn bị dữ liệu trong docs/checkout-validation.md. Không chạy cả collection với cùng một trạng thái Cart.\n\nHTTP mong đợi: 401. Các trường Task 2 mong đợi trong response mở rộng:\n\n{\n  \"message\": \"Access token is required\"\n}"
       },
       "event": [
         {
@@ -199,14 +200,14 @@
             "exec": [
               "/**",
               " * @Author: Minh Truong",
-              " * Mục đích: kiểm tra mã HTTP và toàn bộ response của ca thử.",
+              " * Mục đích: kiểm tra mã HTTP và các trường Task 2 trong response mở rộng của ca thử.",
               " * Bước 1: Đọc response JSON.",
               " * Bước 2: Thay biến ID bằng giá trị của dữ liệu thử nghiệm.",
               " * Bước 3: So sánh kết quả; lỗi phải được báo thay vì coi là đạt.",
               " */",
               "pm.test('TC02: HTTP 401', function () { pm.response.to.have.status(401); });",
               "const expected = JSON.parse(pm.variables.replaceIn(\"{\\\"message\\\":\\\"Access token is required\\\"}\"));",
-              "pm.test('TC02: response đúng hợp đồng', function () { pm.expect(pm.response.json()).to.deep.equal(expected); });"
+              "pm.test('TC02: response đúng hợp đồng', function () { pm.expect(pm.response.json()).to.deep.include(expected); });"
             ]
           }
         }
@@ -298,7 +299,7 @@
             }
           }
         },
-        "description": "Chuẩn bị: Dùng chuỗi token không hợp lệ đã có sẵn trong request.\n\nChạy từng request sau khi chuẩn bị dữ liệu trong docs/checkout-validation.md. Không chạy cả collection với cùng một trạng thái Cart.\n\nHTTP mong đợi: 401. Response mong đợi:\n\n{\n  \"message\": \"Invalid or expired token\"\n}"
+        "description": "Chuẩn bị: Dùng chuỗi token không hợp lệ đã có sẵn trong request.\n\nChạy từng request sau khi chuẩn bị dữ liệu trong docs/checkout-validation.md. Không chạy cả collection với cùng một trạng thái Cart.\n\nHTTP mong đợi: 401. Các trường Task 2 mong đợi trong response mở rộng:\n\n{\n  \"message\": \"Invalid or expired token\"\n}"
       },
       "event": [
         {
@@ -308,14 +309,14 @@
             "exec": [
               "/**",
               " * @Author: Minh Truong",
-              " * Mục đích: kiểm tra mã HTTP và toàn bộ response của ca thử.",
+              " * Mục đích: kiểm tra mã HTTP và các trường Task 2 trong response mở rộng của ca thử.",
               " * Bước 1: Đọc response JSON.",
               " * Bước 2: Thay biến ID bằng giá trị của dữ liệu thử nghiệm.",
               " * Bước 3: So sánh kết quả; lỗi phải được báo thay vì coi là đạt.",
               " */",
               "pm.test('TC03: HTTP 401', function () { pm.response.to.have.status(401); });",
               "const expected = JSON.parse(pm.variables.replaceIn(\"{\\\"message\\\":\\\"Invalid or expired token\\\"}\"));",
-              "pm.test('TC03: response đúng hợp đồng', function () { pm.expect(pm.response.json()).to.deep.equal(expected); });"
+              "pm.test('TC03: response đúng hợp đồng', function () { pm.expect(pm.response.json()).to.deep.include(expected); });"
             ]
           }
         }
@@ -411,7 +412,7 @@
             }
           }
         },
-        "description": "Chuẩn bị: staffToken là JWT thật của tài khoản STAFF.\n\nChạy từng request sau khi chuẩn bị dữ liệu trong docs/checkout-validation.md. Không chạy cả collection với cùng một trạng thái Cart.\n\nHTTP mong đợi: 403. Response mong đợi:\n\n{\n  \"message\": \"Forbidden: insufficient permission\"\n}"
+        "description": "Chuẩn bị: staffToken là JWT thật của tài khoản STAFF.\n\nChạy từng request sau khi chuẩn bị dữ liệu trong docs/checkout-validation.md. Không chạy cả collection với cùng một trạng thái Cart.\n\nHTTP mong đợi: 403. Các trường Task 2 mong đợi trong response mở rộng:\n\n{\n  \"message\": \"Forbidden: insufficient permission\"\n}"
       },
       "event": [
         {
@@ -421,14 +422,14 @@
             "exec": [
               "/**",
               " * @Author: Minh Truong",
-              " * Mục đích: kiểm tra mã HTTP và toàn bộ response của ca thử.",
+              " * Mục đích: kiểm tra mã HTTP và các trường Task 2 trong response mở rộng của ca thử.",
               " * Bước 1: Đọc response JSON.",
               " * Bước 2: Thay biến ID bằng giá trị của dữ liệu thử nghiệm.",
               " * Bước 3: So sánh kết quả; lỗi phải được báo thay vì coi là đạt.",
               " */",
               "pm.test('TC04: HTTP 403', function () { pm.response.to.have.status(403); });",
               "const expected = JSON.parse(pm.variables.replaceIn(\"{\\\"message\\\":\\\"Forbidden: insufficient permission\\\"}\"));",
-              "pm.test('TC04: response đúng hợp đồng', function () { pm.expect(pm.response.json()).to.deep.equal(expected); });"
+              "pm.test('TC04: response đúng hợp đồng', function () { pm.expect(pm.response.json()).to.deep.include(expected); });"
             ]
           }
         }
@@ -524,7 +525,7 @@
             }
           }
         },
-        "description": "Chuẩn bị: Không cần sửa dữ liệu; bỏ addressId khỏi body.\n\nChạy từng request sau khi chuẩn bị dữ liệu trong docs/checkout-validation.md. Không chạy cả collection với cùng một trạng thái Cart.\n\nHTTP mong đợi: 400. Response mong đợi:\n\n{\n  \"message\": \"Validation failed\",\n  \"errors\": [\n    {\n      \"expected\": \"string\",\n      \"code\": \"invalid_type\",\n      \"path\": [\n        \"addressId\"\n      ],\n      \"message\": \"Address ID must be a string\"\n    }\n  ]\n}"
+        "description": "Chuẩn bị: Không cần sửa dữ liệu; bỏ addressId khỏi body.\n\nChạy từng request sau khi chuẩn bị dữ liệu trong docs/checkout-validation.md. Không chạy cả collection với cùng một trạng thái Cart.\n\nHTTP mong đợi: 400. Các trường Task 2 mong đợi trong response mở rộng:\n\n{\n  \"message\": \"Validation failed\",\n  \"errors\": [\n    {\n      \"expected\": \"string\",\n      \"code\": \"invalid_type\",\n      \"path\": [\n        \"addressId\"\n      ],\n      \"message\": \"Address ID must be a string\"\n    }\n  ]\n}"
       },
       "event": [
         {
@@ -534,14 +535,14 @@
             "exec": [
               "/**",
               " * @Author: Minh Truong",
-              " * Mục đích: kiểm tra mã HTTP và toàn bộ response của ca thử.",
+              " * Mục đích: kiểm tra mã HTTP và các trường Task 2 trong response mở rộng của ca thử.",
               " * Bước 1: Đọc response JSON.",
               " * Bước 2: Thay biến ID bằng giá trị của dữ liệu thử nghiệm.",
               " * Bước 3: So sánh kết quả; lỗi phải được báo thay vì coi là đạt.",
               " */",
               "pm.test('TC05: HTTP 400', function () { pm.response.to.have.status(400); });",
               "const expected = JSON.parse(pm.variables.replaceIn(\"{\\\"message\\\":\\\"Validation failed\\\",\\\"errors\\\":[{\\\"expected\\\":\\\"string\\\",\\\"code\\\":\\\"invalid_type\\\",\\\"path\\\":[\\\"addressId\\\"],\\\"message\\\":\\\"Address ID must be a string\\\"}]}\"));",
-              "pm.test('TC05: response đúng hợp đồng', function () { pm.expect(pm.response.json()).to.deep.equal(expected); });"
+              "pm.test('TC05: response đúng hợp đồng', function () { pm.expect(pm.response.json()).to.deep.include(expected); });"
             ]
           }
         }
@@ -637,7 +638,7 @@
             }
           }
         },
-        "description": "Chuẩn bị: Không cần sửa dữ liệu; addressId không phải ObjectId.\n\nChạy từng request sau khi chuẩn bị dữ liệu trong docs/checkout-validation.md. Không chạy cả collection với cùng một trạng thái Cart.\n\nHTTP mong đợi: 400. Response mong đợi:\n\n{\n  \"message\": \"Validation failed\",\n  \"errors\": [\n    {\n      \"origin\": \"string\",\n      \"code\": \"invalid_format\",\n      \"format\": \"regex\",\n      \"pattern\": \"/^[a-fA-F0-9]{24}$/\",\n      \"path\": [\n        \"addressId\"\n      ],\n      \"message\": \"Invalid address ID\"\n    }\n  ]\n}"
+        "description": "Chuẩn bị: Không cần sửa dữ liệu; addressId không phải ObjectId.\n\nChạy từng request sau khi chuẩn bị dữ liệu trong docs/checkout-validation.md. Không chạy cả collection với cùng một trạng thái Cart.\n\nHTTP mong đợi: 400. Các trường Task 2 mong đợi trong response mở rộng:\n\n{\n  \"message\": \"Validation failed\",\n  \"errors\": [\n    {\n      \"origin\": \"string\",\n      \"code\": \"invalid_format\",\n      \"format\": \"regex\",\n      \"pattern\": \"/^[a-fA-F0-9]{24}$/\",\n      \"path\": [\n        \"addressId\"\n      ],\n      \"message\": \"Invalid address ID\"\n    }\n  ]\n}"
       },
       "event": [
         {
@@ -647,14 +648,14 @@
             "exec": [
               "/**",
               " * @Author: Minh Truong",
-              " * Mục đích: kiểm tra mã HTTP và toàn bộ response của ca thử.",
+              " * Mục đích: kiểm tra mã HTTP và các trường Task 2 trong response mở rộng của ca thử.",
               " * Bước 1: Đọc response JSON.",
               " * Bước 2: Thay biến ID bằng giá trị của dữ liệu thử nghiệm.",
               " * Bước 3: So sánh kết quả; lỗi phải được báo thay vì coi là đạt.",
               " */",
               "pm.test('TC06: HTTP 400', function () { pm.response.to.have.status(400); });",
               "const expected = JSON.parse(pm.variables.replaceIn(\"{\\\"message\\\":\\\"Validation failed\\\",\\\"errors\\\":[{\\\"origin\\\":\\\"string\\\",\\\"code\\\":\\\"invalid_format\\\",\\\"format\\\":\\\"regex\\\",\\\"pattern\\\":\\\"/^[a-fA-F0-9]{24}$/\\\",\\\"path\\\":[\\\"addressId\\\"],\\\"message\\\":\\\"Invalid address ID\\\"}]}\"));",
-              "pm.test('TC06: response đúng hợp đồng', function () { pm.expect(pm.response.json()).to.deep.equal(expected); });"
+              "pm.test('TC06: response đúng hợp đồng', function () { pm.expect(pm.response.json()).to.deep.include(expected); });"
             ]
           }
         }
@@ -750,7 +751,7 @@
             }
           }
         },
-        "description": "Chuẩn bị: missingAddressId là ObjectId 24 ký tự hex, bảo đảm không có trong collection addresses.\n\nChạy từng request sau khi chuẩn bị dữ liệu trong docs/checkout-validation.md. Không chạy cả collection với cùng một trạng thái Cart.\n\nHTTP mong đợi: 404. Response mong đợi:\n\n{\n  \"message\": \"Không tìm thấy địa chỉ\"\n}"
+        "description": "Chuẩn bị: missingAddressId là ObjectId 24 ký tự hex, bảo đảm không có trong collection addresses.\n\nChạy từng request sau khi chuẩn bị dữ liệu trong docs/checkout-validation.md. Không chạy cả collection với cùng một trạng thái Cart.\n\nHTTP mong đợi: 404. Các trường Task 2 mong đợi trong response mở rộng:\n\n{\n  \"message\": \"Không tìm thấy địa chỉ\"\n}"
       },
       "event": [
         {
@@ -760,14 +761,14 @@
             "exec": [
               "/**",
               " * @Author: Minh Truong",
-              " * Mục đích: kiểm tra mã HTTP và toàn bộ response của ca thử.",
+              " * Mục đích: kiểm tra mã HTTP và các trường Task 2 trong response mở rộng của ca thử.",
               " * Bước 1: Đọc response JSON.",
               " * Bước 2: Thay biến ID bằng giá trị của dữ liệu thử nghiệm.",
               " * Bước 3: So sánh kết quả; lỗi phải được báo thay vì coi là đạt.",
               " */",
               "pm.test('TC07: HTTP 404', function () { pm.response.to.have.status(404); });",
               "const expected = JSON.parse(pm.variables.replaceIn(\"{\\\"message\\\":\\\"Không tìm thấy địa chỉ\\\"}\"));",
-              "pm.test('TC07: response đúng hợp đồng', function () { pm.expect(pm.response.json()).to.deep.equal(expected); });"
+              "pm.test('TC07: response đúng hợp đồng', function () { pm.expect(pm.response.json()).to.deep.include(expected); });"
             ]
           }
         }
@@ -863,7 +864,7 @@
             }
           }
         },
-        "description": "Chuẩn bị: foreignAddressId là địa chỉ có userId khác Customer trong customerToken.\n\nChạy từng request sau khi chuẩn bị dữ liệu trong docs/checkout-validation.md. Không chạy cả collection với cùng một trạng thái Cart.\n\nHTTP mong đợi: 404. Response mong đợi:\n\n{\n  \"message\": \"Không tìm thấy địa chỉ\"\n}"
+        "description": "Chuẩn bị: foreignAddressId là địa chỉ có userId khác Customer trong customerToken.\n\nChạy từng request sau khi chuẩn bị dữ liệu trong docs/checkout-validation.md. Không chạy cả collection với cùng một trạng thái Cart.\n\nHTTP mong đợi: 404. Các trường Task 2 mong đợi trong response mở rộng:\n\n{\n  \"message\": \"Không tìm thấy địa chỉ\"\n}"
       },
       "event": [
         {
@@ -873,14 +874,14 @@
             "exec": [
               "/**",
               " * @Author: Minh Truong",
-              " * Mục đích: kiểm tra mã HTTP và toàn bộ response của ca thử.",
+              " * Mục đích: kiểm tra mã HTTP và các trường Task 2 trong response mở rộng của ca thử.",
               " * Bước 1: Đọc response JSON.",
               " * Bước 2: Thay biến ID bằng giá trị của dữ liệu thử nghiệm.",
               " * Bước 3: So sánh kết quả; lỗi phải được báo thay vì coi là đạt.",
               " */",
               "pm.test('TC08: HTTP 404', function () { pm.response.to.have.status(404); });",
               "const expected = JSON.parse(pm.variables.replaceIn(\"{\\\"message\\\":\\\"Không tìm thấy địa chỉ\\\"}\"));",
-              "pm.test('TC08: response đúng hợp đồng', function () { pm.expect(pm.response.json()).to.deep.equal(expected); });"
+              "pm.test('TC08: response đúng hợp đồng', function () { pm.expect(pm.response.json()).to.deep.include(expected); });"
             ]
           }
         }
@@ -976,7 +977,7 @@
             }
           }
         },
-        "description": "Chuẩn bị: Đăng nhập Customer mới có Address hợp lệ nhưng chưa từng thêm hàng; đặt lại customerToken và addressId tương ứng.\n\nChạy từng request sau khi chuẩn bị dữ liệu trong docs/checkout-validation.md. Không chạy cả collection với cùng một trạng thái Cart.\n\nHTTP mong đợi: 400. Response mong đợi:\n\n{\n  \"message\": \"Cart not found\",\n  \"valid\": false\n}"
+        "description": "Chuẩn bị: Đăng nhập Customer mới có Address hợp lệ nhưng chưa từng thêm hàng; đặt lại customerToken và addressId tương ứng.\n\nChạy từng request sau khi chuẩn bị dữ liệu trong docs/checkout-validation.md. Không chạy cả collection với cùng một trạng thái Cart.\n\nHTTP mong đợi: 400. Các trường Task 2 mong đợi trong response mở rộng:\n\n{\n  \"message\": \"Cart not found\",\n  \"valid\": false\n}"
       },
       "event": [
         {
@@ -986,14 +987,14 @@
             "exec": [
               "/**",
               " * @Author: Minh Truong",
-              " * Mục đích: kiểm tra mã HTTP và toàn bộ response của ca thử.",
+              " * Mục đích: kiểm tra mã HTTP và các trường Task 2 trong response mở rộng của ca thử.",
               " * Bước 1: Đọc response JSON.",
               " * Bước 2: Thay biến ID bằng giá trị của dữ liệu thử nghiệm.",
               " * Bước 3: So sánh kết quả; lỗi phải được báo thay vì coi là đạt.",
               " */",
               "pm.test('TC09: HTTP 400', function () { pm.response.to.have.status(400); });",
               "const expected = JSON.parse(pm.variables.replaceIn(\"{\\\"message\\\":\\\"Cart not found\\\",\\\"valid\\\":false}\"));",
-              "pm.test('TC09: response đúng hợp đồng', function () { pm.expect(pm.response.json()).to.deep.equal(expected); });"
+              "pm.test('TC09: response đúng hợp đồng', function () { pm.expect(pm.response.json()).to.deep.include(expected); });"
             ]
           }
         }
@@ -1089,7 +1090,7 @@
             }
           }
         },
-        "description": "Chuẩn bị: Cart tồn tại với items=[]; dùng Customer thử nghiệm đã thêm rồi xóa toàn bộ item.\n\nChạy từng request sau khi chuẩn bị dữ liệu trong docs/checkout-validation.md. Không chạy cả collection với cùng một trạng thái Cart.\n\nHTTP mong đợi: 400. Response mong đợi:\n\n{\n  \"message\": \"Cart is empty\",\n  \"valid\": false\n}"
+        "description": "Chuẩn bị: Cart tồn tại với items=[]; dùng Customer thử nghiệm đã thêm rồi xóa toàn bộ item.\n\nChạy từng request sau khi chuẩn bị dữ liệu trong docs/checkout-validation.md. Không chạy cả collection với cùng một trạng thái Cart.\n\nHTTP mong đợi: 400. Các trường Task 2 mong đợi trong response mở rộng:\n\n{\n  \"message\": \"Cart is empty\",\n  \"valid\": false\n}"
       },
       "event": [
         {
@@ -1099,14 +1100,14 @@
             "exec": [
               "/**",
               " * @Author: Minh Truong",
-              " * Mục đích: kiểm tra mã HTTP và toàn bộ response của ca thử.",
+              " * Mục đích: kiểm tra mã HTTP và các trường Task 2 trong response mở rộng của ca thử.",
               " * Bước 1: Đọc response JSON.",
               " * Bước 2: Thay biến ID bằng giá trị của dữ liệu thử nghiệm.",
               " * Bước 3: So sánh kết quả; lỗi phải được báo thay vì coi là đạt.",
               " */",
               "pm.test('TC10: HTTP 400', function () { pm.response.to.have.status(400); });",
               "const expected = JSON.parse(pm.variables.replaceIn(\"{\\\"message\\\":\\\"Cart is empty\\\",\\\"valid\\\":false}\"));",
-              "pm.test('TC10: response đúng hợp đồng', function () { pm.expect(pm.response.json()).to.deep.equal(expected); });"
+              "pm.test('TC10: response đúng hợp đồng', function () { pm.expect(pm.response.json()).to.deep.include(expected); });"
             ]
           }
         }
@@ -1202,7 +1203,7 @@
             }
           }
         },
-        "description": "Chuẩn bị: Chuẩn bị Cart hợp lệ, sau đó đổi items[0].variantId sang ObjectId không tồn tại trong database thử nghiệm. Đặt itemId đúng dòng này.\n\nChạy từng request sau khi chuẩn bị dữ liệu trong docs/checkout-validation.md. Không chạy cả collection với cùng một trạng thái Cart.\n\nHTTP mong đợi: 400. Response mong đợi:\n\n{\n  \"message\": \"Cart is invalid for checkout\",\n  \"valid\": false,\n  \"errors\": [\n    {\n      \"itemId\": \"{{itemId}}\",\n      \"variantId\": null,\n      \"code\": \"VARIANT_NOT_FOUND\",\n      \"message\": \"Product variant not found\"\n    }\n  ]\n}"
+        "description": "Chuẩn bị: Chuẩn bị Cart hợp lệ, sau đó đổi items[0].variantId sang ObjectId không tồn tại trong database thử nghiệm. Đặt itemId đúng dòng này.\n\nChạy từng request sau khi chuẩn bị dữ liệu trong docs/checkout-validation.md. Không chạy cả collection với cùng một trạng thái Cart.\n\nHTTP mong đợi: 400. Các trường Task 2 mong đợi trong response mở rộng:\n\n{\n  \"message\": \"Cart is invalid for checkout\",\n  \"valid\": false,\n  \"errors\": [\n    {\n      \"itemId\": \"{{itemId}}\",\n      \"variantId\": null,\n      \"code\": \"VARIANT_NOT_FOUND\",\n      \"message\": \"Product variant not found\"\n    }\n  ]\n}"
       },
       "event": [
         {
@@ -1212,14 +1213,14 @@
             "exec": [
               "/**",
               " * @Author: Minh Truong",
-              " * Mục đích: kiểm tra mã HTTP và toàn bộ response của ca thử.",
+              " * Mục đích: kiểm tra mã HTTP và các trường Task 2 trong response mở rộng của ca thử.",
               " * Bước 1: Đọc response JSON.",
               " * Bước 2: Thay biến ID bằng giá trị của dữ liệu thử nghiệm.",
               " * Bước 3: So sánh kết quả; lỗi phải được báo thay vì coi là đạt.",
               " */",
               "pm.test('TC11: HTTP 400', function () { pm.response.to.have.status(400); });",
               "const expected = JSON.parse(pm.variables.replaceIn(\"{\\\"message\\\":\\\"Cart is invalid for checkout\\\",\\\"valid\\\":false,\\\"errors\\\":[{\\\"itemId\\\":\\\"{{itemId}}\\\",\\\"variantId\\\":null,\\\"code\\\":\\\"VARIANT_NOT_FOUND\\\",\\\"message\\\":\\\"Product variant not found\\\"}]}\"));",
-              "pm.test('TC11: response đúng hợp đồng', function () { pm.expect(pm.response.json()).to.deep.equal(expected); });"
+              "pm.test('TC11: response đúng hợp đồng', function () { pm.expect(pm.response.json()).to.deep.include(expected); });"
             ]
           }
         }
@@ -1315,7 +1316,7 @@
             }
           }
         },
-        "description": "Chuẩn bị: Một item hợp lệ về quantity; Variant isActive=false; Product tồn tại và isActive=true.\n\nChạy từng request sau khi chuẩn bị dữ liệu trong docs/checkout-validation.md. Không chạy cả collection với cùng một trạng thái Cart.\n\nHTTP mong đợi: 400. Response mong đợi:\n\n{\n  \"message\": \"Cart is invalid for checkout\",\n  \"valid\": false,\n  \"errors\": [\n    {\n      \"itemId\": \"{{itemId}}\",\n      \"variantId\": \"{{variantId}}\",\n      \"code\": \"VARIANT_INACTIVE\",\n      \"message\": \"Product variant is no longer available for sale\"\n    }\n  ]\n}"
+        "description": "Chuẩn bị: Một item hợp lệ về quantity; Variant isActive=false; Product tồn tại và isActive=true.\n\nChạy từng request sau khi chuẩn bị dữ liệu trong docs/checkout-validation.md. Không chạy cả collection với cùng một trạng thái Cart.\n\nHTTP mong đợi: 400. Các trường Task 2 mong đợi trong response mở rộng:\n\n{\n  \"message\": \"Cart is invalid for checkout\",\n  \"valid\": false,\n  \"errors\": [\n    {\n      \"itemId\": \"{{itemId}}\",\n      \"variantId\": \"{{variantId}}\",\n      \"code\": \"VARIANT_INACTIVE\",\n      \"message\": \"Product variant is no longer available for sale\"\n    }\n  ]\n}"
       },
       "event": [
         {
@@ -1325,14 +1326,14 @@
             "exec": [
               "/**",
               " * @Author: Minh Truong",
-              " * Mục đích: kiểm tra mã HTTP và toàn bộ response của ca thử.",
+              " * Mục đích: kiểm tra mã HTTP và các trường Task 2 trong response mở rộng của ca thử.",
               " * Bước 1: Đọc response JSON.",
               " * Bước 2: Thay biến ID bằng giá trị của dữ liệu thử nghiệm.",
               " * Bước 3: So sánh kết quả; lỗi phải được báo thay vì coi là đạt.",
               " */",
               "pm.test('TC12: HTTP 400', function () { pm.response.to.have.status(400); });",
               "const expected = JSON.parse(pm.variables.replaceIn(\"{\\\"message\\\":\\\"Cart is invalid for checkout\\\",\\\"valid\\\":false,\\\"errors\\\":[{\\\"itemId\\\":\\\"{{itemId}}\\\",\\\"variantId\\\":\\\"{{variantId}}\\\",\\\"code\\\":\\\"VARIANT_INACTIVE\\\",\\\"message\\\":\\\"Product variant is no longer available for sale\\\"}]}\"));",
-              "pm.test('TC12: response đúng hợp đồng', function () { pm.expect(pm.response.json()).to.deep.equal(expected); });"
+              "pm.test('TC12: response đúng hợp đồng', function () { pm.expect(pm.response.json()).to.deep.include(expected); });"
             ]
           }
         }
@@ -1428,7 +1429,7 @@
             }
           }
         },
-        "description": "Chuẩn bị: Variant tồn tại, isActive=true nhưng productId trỏ tới ObjectId không tồn tại; quantity hợp lệ.\n\nChạy từng request sau khi chuẩn bị dữ liệu trong docs/checkout-validation.md. Không chạy cả collection với cùng một trạng thái Cart.\n\nHTTP mong đợi: 400. Response mong đợi:\n\n{\n  \"message\": \"Cart is invalid for checkout\",\n  \"valid\": false,\n  \"errors\": [\n    {\n      \"itemId\": \"{{itemId}}\",\n      \"variantId\": \"{{variantId}}\",\n      \"code\": \"PRODUCT_NOT_FOUND\",\n      \"message\": \"Product not found\"\n    }\n  ]\n}"
+        "description": "Chuẩn bị: Variant tồn tại, isActive=true nhưng productId trỏ tới ObjectId không tồn tại; quantity hợp lệ.\n\nChạy từng request sau khi chuẩn bị dữ liệu trong docs/checkout-validation.md. Không chạy cả collection với cùng một trạng thái Cart.\n\nHTTP mong đợi: 400. Các trường Task 2 mong đợi trong response mở rộng:\n\n{\n  \"message\": \"Cart is invalid for checkout\",\n  \"valid\": false,\n  \"errors\": [\n    {\n      \"itemId\": \"{{itemId}}\",\n      \"variantId\": \"{{variantId}}\",\n      \"code\": \"PRODUCT_NOT_FOUND\",\n      \"message\": \"Product not found\"\n    }\n  ]\n}"
       },
       "event": [
         {
@@ -1438,14 +1439,14 @@
             "exec": [
               "/**",
               " * @Author: Minh Truong",
-              " * Mục đích: kiểm tra mã HTTP và toàn bộ response của ca thử.",
+              " * Mục đích: kiểm tra mã HTTP và các trường Task 2 trong response mở rộng của ca thử.",
               " * Bước 1: Đọc response JSON.",
               " * Bước 2: Thay biến ID bằng giá trị của dữ liệu thử nghiệm.",
               " * Bước 3: So sánh kết quả; lỗi phải được báo thay vì coi là đạt.",
               " */",
               "pm.test('TC13: HTTP 400', function () { pm.response.to.have.status(400); });",
               "const expected = JSON.parse(pm.variables.replaceIn(\"{\\\"message\\\":\\\"Cart is invalid for checkout\\\",\\\"valid\\\":false,\\\"errors\\\":[{\\\"itemId\\\":\\\"{{itemId}}\\\",\\\"variantId\\\":\\\"{{variantId}}\\\",\\\"code\\\":\\\"PRODUCT_NOT_FOUND\\\",\\\"message\\\":\\\"Product not found\\\"}]}\"));",
-              "pm.test('TC13: response đúng hợp đồng', function () { pm.expect(pm.response.json()).to.deep.equal(expected); });"
+              "pm.test('TC13: response đúng hợp đồng', function () { pm.expect(pm.response.json()).to.deep.include(expected); });"
             ]
           }
         }
@@ -1541,7 +1542,7 @@
             }
           }
         },
-        "description": "Chuẩn bị: Variant tồn tại, isActive=true; Product tồn tại, isActive=false; quantity hợp lệ.\n\nChạy từng request sau khi chuẩn bị dữ liệu trong docs/checkout-validation.md. Không chạy cả collection với cùng một trạng thái Cart.\n\nHTTP mong đợi: 400. Response mong đợi:\n\n{\n  \"message\": \"Cart is invalid for checkout\",\n  \"valid\": false,\n  \"errors\": [\n    {\n      \"itemId\": \"{{itemId}}\",\n      \"variantId\": \"{{variantId}}\",\n      \"code\": \"PRODUCT_INACTIVE\",\n      \"message\": \"Product is no longer available for sale\"\n    }\n  ]\n}"
+        "description": "Chuẩn bị: Variant tồn tại, isActive=true; Product tồn tại, isActive=false; quantity hợp lệ.\n\nChạy từng request sau khi chuẩn bị dữ liệu trong docs/checkout-validation.md. Không chạy cả collection với cùng một trạng thái Cart.\n\nHTTP mong đợi: 400. Các trường Task 2 mong đợi trong response mở rộng:\n\n{\n  \"message\": \"Cart is invalid for checkout\",\n  \"valid\": false,\n  \"errors\": [\n    {\n      \"itemId\": \"{{itemId}}\",\n      \"variantId\": \"{{variantId}}\",\n      \"code\": \"PRODUCT_INACTIVE\",\n      \"message\": \"Product is no longer available for sale\"\n    }\n  ]\n}"
       },
       "event": [
         {
@@ -1551,14 +1552,14 @@
             "exec": [
               "/**",
               " * @Author: Minh Truong",
-              " * Mục đích: kiểm tra mã HTTP và toàn bộ response của ca thử.",
+              " * Mục đích: kiểm tra mã HTTP và các trường Task 2 trong response mở rộng của ca thử.",
               " * Bước 1: Đọc response JSON.",
               " * Bước 2: Thay biến ID bằng giá trị của dữ liệu thử nghiệm.",
               " * Bước 3: So sánh kết quả; lỗi phải được báo thay vì coi là đạt.",
               " */",
               "pm.test('TC14: HTTP 400', function () { pm.response.to.have.status(400); });",
               "const expected = JSON.parse(pm.variables.replaceIn(\"{\\\"message\\\":\\\"Cart is invalid for checkout\\\",\\\"valid\\\":false,\\\"errors\\\":[{\\\"itemId\\\":\\\"{{itemId}}\\\",\\\"variantId\\\":\\\"{{variantId}}\\\",\\\"code\\\":\\\"PRODUCT_INACTIVE\\\",\\\"message\\\":\\\"Product is no longer available for sale\\\"}]}\"));",
-              "pm.test('TC14: response đúng hợp đồng', function () { pm.expect(pm.response.json()).to.deep.equal(expected); });"
+              "pm.test('TC14: response đúng hợp đồng', function () { pm.expect(pm.response.json()).to.deep.include(expected); });"
             ]
           }
         }
@@ -1654,7 +1655,7 @@
             }
           }
         },
-        "description": "Chuẩn bị: Trong database thử nghiệm, đặt items[0].quantity=0; Variant và Product đều hợp lệ.\n\nChạy từng request sau khi chuẩn bị dữ liệu trong docs/checkout-validation.md. Không chạy cả collection với cùng một trạng thái Cart.\n\nHTTP mong đợi: 400. Response mong đợi:\n\n{\n  \"message\": \"Cart is invalid for checkout\",\n  \"valid\": false,\n  \"errors\": [\n    {\n      \"itemId\": \"{{itemId}}\",\n      \"variantId\": \"{{variantId}}\",\n      \"code\": \"INVALID_QUANTITY\",\n      \"message\": \"Quantity must be an integer greater than or equal to 1\"\n    }\n  ]\n}"
+        "description": "Chuẩn bị: Trong database thử nghiệm, đặt items[0].quantity=0; Variant và Product đều hợp lệ.\n\nChạy từng request sau khi chuẩn bị dữ liệu trong docs/checkout-validation.md. Không chạy cả collection với cùng một trạng thái Cart.\n\nHTTP mong đợi: 400. Các trường Task 2 mong đợi trong response mở rộng:\n\n{\n  \"message\": \"Cart is invalid for checkout\",\n  \"valid\": false,\n  \"errors\": [\n    {\n      \"itemId\": \"{{itemId}}\",\n      \"variantId\": \"{{variantId}}\",\n      \"code\": \"INVALID_QUANTITY\",\n      \"message\": \"Quantity must be a safe integer greater than or equal to 1\"\n    }\n  ]\n}"
       },
       "event": [
         {
@@ -1664,14 +1665,14 @@
             "exec": [
               "/**",
               " * @Author: Minh Truong",
-              " * Mục đích: kiểm tra mã HTTP và toàn bộ response của ca thử.",
+              " * Mục đích: kiểm tra mã HTTP và các trường Task 2 trong response mở rộng của ca thử.",
               " * Bước 1: Đọc response JSON.",
               " * Bước 2: Thay biến ID bằng giá trị của dữ liệu thử nghiệm.",
               " * Bước 3: So sánh kết quả; lỗi phải được báo thay vì coi là đạt.",
               " */",
               "pm.test('TC15: HTTP 400', function () { pm.response.to.have.status(400); });",
-              "const expected = JSON.parse(pm.variables.replaceIn(\"{\\\"message\\\":\\\"Cart is invalid for checkout\\\",\\\"valid\\\":false,\\\"errors\\\":[{\\\"itemId\\\":\\\"{{itemId}}\\\",\\\"variantId\\\":\\\"{{variantId}}\\\",\\\"code\\\":\\\"INVALID_QUANTITY\\\",\\\"message\\\":\\\"Quantity must be an integer greater than or equal to 1\\\"}]}\"));",
-              "pm.test('TC15: response đúng hợp đồng', function () { pm.expect(pm.response.json()).to.deep.equal(expected); });"
+              "const expected = JSON.parse(pm.variables.replaceIn(\"{\\\"message\\\":\\\"Cart is invalid for checkout\\\",\\\"valid\\\":false,\\\"errors\\\":[{\\\"itemId\\\":\\\"{{itemId}}\\\",\\\"variantId\\\":\\\"{{variantId}}\\\",\\\"code\\\":\\\"INVALID_QUANTITY\\\",\\\"message\\\":\\\"Quantity must be a safe integer greater than or equal to 1\\\"}]}\"));",
+              "pm.test('TC15: response đúng hợp đồng', function () { pm.expect(pm.response.json()).to.deep.include(expected); });"
             ]
           }
         }
@@ -1714,7 +1715,7 @@
                 }
               }
             },
-            "description": "Chuẩn bị: Trong database thử nghiệm, đặt items[0].quantity=0; Variant và Product đều hợp lệ.\n\nChạy từng request sau khi chuẩn bị dữ liệu trong docs/checkout-validation.md. Không chạy cả collection với cùng một trạng thái Cart.\n\nHTTP mong đợi: 400. Response mong đợi:\n\n{\n  \"message\": \"Cart is invalid for checkout\",\n  \"valid\": false,\n  \"errors\": [\n    {\n      \"itemId\": \"{{itemId}}\",\n      \"variantId\": \"{{variantId}}\",\n      \"code\": \"INVALID_QUANTITY\",\n      \"message\": \"Quantity must be an integer greater than or equal to 1\"\n    }\n  ]\n}"
+            "description": "Chuẩn bị: Trong database thử nghiệm, đặt items[0].quantity=0; Variant và Product đều hợp lệ.\n\nChạy từng request sau khi chuẩn bị dữ liệu trong docs/checkout-validation.md. Không chạy cả collection với cùng một trạng thái Cart.\n\nHTTP mong đợi: 400. Response mong đợi:\n\n{\n  \"message\": \"Cart is invalid for checkout\",\n  \"valid\": false,\n  \"errors\": [\n    {\n      \"itemId\": \"{{itemId}}\",\n      \"variantId\": \"{{variantId}}\",\n      \"code\": \"INVALID_QUANTITY\",\n      \"message\": \"Quantity must be a safe integer greater than or equal to 1\"\n    }\n  ]\n}"
           },
           "status": "Bad Request",
           "code": 400,
@@ -1726,7 +1727,7 @@
             }
           ],
           "cookie": [],
-          "body": "{\n  \"message\": \"Cart is invalid for checkout\",\n  \"valid\": false,\n  \"errors\": [\n    {\n      \"itemId\": \"{{itemId}}\",\n      \"variantId\": \"{{variantId}}\",\n      \"code\": \"INVALID_QUANTITY\",\n      \"message\": \"Quantity must be an integer greater than or equal to 1\"\n    }\n  ]\n}"
+          "body": "{\n  \"message\": \"Cart is invalid for checkout\",\n  \"valid\": false,\n  \"errors\": [\n    {\n      \"itemId\": \"{{itemId}}\",\n      \"variantId\": \"{{variantId}}\",\n      \"code\": \"INVALID_QUANTITY\",\n      \"message\": \"Quantity must be a safe integer greater than or equal to 1\"\n    }\n  ]\n}"
         }
       ]
     },
@@ -1767,7 +1768,7 @@
             }
           }
         },
-        "description": "Chuẩn bị: Trong database thử nghiệm, đặt items[0].quantity=-1; Variant và Product đều hợp lệ.\n\nChạy từng request sau khi chuẩn bị dữ liệu trong docs/checkout-validation.md. Không chạy cả collection với cùng một trạng thái Cart.\n\nHTTP mong đợi: 400. Response mong đợi:\n\n{\n  \"message\": \"Cart is invalid for checkout\",\n  \"valid\": false,\n  \"errors\": [\n    {\n      \"itemId\": \"{{itemId}}\",\n      \"variantId\": \"{{variantId}}\",\n      \"code\": \"INVALID_QUANTITY\",\n      \"message\": \"Quantity must be an integer greater than or equal to 1\"\n    }\n  ]\n}"
+        "description": "Chuẩn bị: Trong database thử nghiệm, đặt items[0].quantity=-1; Variant và Product đều hợp lệ.\n\nChạy từng request sau khi chuẩn bị dữ liệu trong docs/checkout-validation.md. Không chạy cả collection với cùng một trạng thái Cart.\n\nHTTP mong đợi: 400. Các trường Task 2 mong đợi trong response mở rộng:\n\n{\n  \"message\": \"Cart is invalid for checkout\",\n  \"valid\": false,\n  \"errors\": [\n    {\n      \"itemId\": \"{{itemId}}\",\n      \"variantId\": \"{{variantId}}\",\n      \"code\": \"INVALID_QUANTITY\",\n      \"message\": \"Quantity must be a safe integer greater than or equal to 1\"\n    }\n  ]\n}"
       },
       "event": [
         {
@@ -1777,14 +1778,14 @@
             "exec": [
               "/**",
               " * @Author: Minh Truong",
-              " * Mục đích: kiểm tra mã HTTP và toàn bộ response của ca thử.",
+              " * Mục đích: kiểm tra mã HTTP và các trường Task 2 trong response mở rộng của ca thử.",
               " * Bước 1: Đọc response JSON.",
               " * Bước 2: Thay biến ID bằng giá trị của dữ liệu thử nghiệm.",
               " * Bước 3: So sánh kết quả; lỗi phải được báo thay vì coi là đạt.",
               " */",
               "pm.test('TC16: HTTP 400', function () { pm.response.to.have.status(400); });",
-              "const expected = JSON.parse(pm.variables.replaceIn(\"{\\\"message\\\":\\\"Cart is invalid for checkout\\\",\\\"valid\\\":false,\\\"errors\\\":[{\\\"itemId\\\":\\\"{{itemId}}\\\",\\\"variantId\\\":\\\"{{variantId}}\\\",\\\"code\\\":\\\"INVALID_QUANTITY\\\",\\\"message\\\":\\\"Quantity must be an integer greater than or equal to 1\\\"}]}\"));",
-              "pm.test('TC16: response đúng hợp đồng', function () { pm.expect(pm.response.json()).to.deep.equal(expected); });"
+              "const expected = JSON.parse(pm.variables.replaceIn(\"{\\\"message\\\":\\\"Cart is invalid for checkout\\\",\\\"valid\\\":false,\\\"errors\\\":[{\\\"itemId\\\":\\\"{{itemId}}\\\",\\\"variantId\\\":\\\"{{variantId}}\\\",\\\"code\\\":\\\"INVALID_QUANTITY\\\",\\\"message\\\":\\\"Quantity must be a safe integer greater than or equal to 1\\\"}]}\"));",
+              "pm.test('TC16: response đúng hợp đồng', function () { pm.expect(pm.response.json()).to.deep.include(expected); });"
             ]
           }
         }
@@ -1827,7 +1828,7 @@
                 }
               }
             },
-            "description": "Chuẩn bị: Trong database thử nghiệm, đặt items[0].quantity=-1; Variant và Product đều hợp lệ.\n\nChạy từng request sau khi chuẩn bị dữ liệu trong docs/checkout-validation.md. Không chạy cả collection với cùng một trạng thái Cart.\n\nHTTP mong đợi: 400. Response mong đợi:\n\n{\n  \"message\": \"Cart is invalid for checkout\",\n  \"valid\": false,\n  \"errors\": [\n    {\n      \"itemId\": \"{{itemId}}\",\n      \"variantId\": \"{{variantId}}\",\n      \"code\": \"INVALID_QUANTITY\",\n      \"message\": \"Quantity must be an integer greater than or equal to 1\"\n    }\n  ]\n}"
+            "description": "Chuẩn bị: Trong database thử nghiệm, đặt items[0].quantity=-1; Variant và Product đều hợp lệ.\n\nChạy từng request sau khi chuẩn bị dữ liệu trong docs/checkout-validation.md. Không chạy cả collection với cùng một trạng thái Cart.\n\nHTTP mong đợi: 400. Response mong đợi:\n\n{\n  \"message\": \"Cart is invalid for checkout\",\n  \"valid\": false,\n  \"errors\": [\n    {\n      \"itemId\": \"{{itemId}}\",\n      \"variantId\": \"{{variantId}}\",\n      \"code\": \"INVALID_QUANTITY\",\n      \"message\": \"Quantity must be a safe integer greater than or equal to 1\"\n    }\n  ]\n}"
           },
           "status": "Bad Request",
           "code": 400,
@@ -1839,7 +1840,7 @@
             }
           ],
           "cookie": [],
-          "body": "{\n  \"message\": \"Cart is invalid for checkout\",\n  \"valid\": false,\n  \"errors\": [\n    {\n      \"itemId\": \"{{itemId}}\",\n      \"variantId\": \"{{variantId}}\",\n      \"code\": \"INVALID_QUANTITY\",\n      \"message\": \"Quantity must be an integer greater than or equal to 1\"\n    }\n  ]\n}"
+          "body": "{\n  \"message\": \"Cart is invalid for checkout\",\n  \"valid\": false,\n  \"errors\": [\n    {\n      \"itemId\": \"{{itemId}}\",\n      \"variantId\": \"{{variantId}}\",\n      \"code\": \"INVALID_QUANTITY\",\n      \"message\": \"Quantity must be a safe integer greater than or equal to 1\"\n    }\n  ]\n}"
         }
       ]
     },
@@ -1880,7 +1881,7 @@
             }
           }
         },
-        "description": "Chuẩn bị: Body cố tình gửi userId khác; phải bị từ chối trước khi truy vấn database.\n\nChạy từng request sau khi chuẩn bị dữ liệu trong docs/checkout-validation.md. Không chạy cả collection với cùng một trạng thái Cart.\n\nHTTP mong đợi: 400. Response mong đợi:\n\n{\n  \"message\": \"Validation failed\",\n  \"errors\": [\n    {\n      \"code\": \"unrecognized_keys\",\n      \"keys\": [\n        \"userId\"\n      ],\n      \"path\": [],\n      \"message\": \"Unrecognized key: \\\"userId\\\"\"\n    }\n  ]\n}"
+        "description": "Chuẩn bị: Body cố tình gửi userId khác; phải bị từ chối trước khi truy vấn database.\n\nChạy từng request sau khi chuẩn bị dữ liệu trong docs/checkout-validation.md. Không chạy cả collection với cùng một trạng thái Cart.\n\nHTTP mong đợi: 400. Các trường Task 2 mong đợi trong response mở rộng:\n\n{\n  \"message\": \"Validation failed\",\n  \"errors\": [\n    {\n      \"code\": \"unrecognized_keys\",\n      \"keys\": [\n        \"userId\"\n      ],\n      \"path\": [],\n      \"message\": \"Unrecognized key: \\\"userId\\\"\"\n    }\n  ]\n}"
       },
       "event": [
         {
@@ -1890,14 +1891,14 @@
             "exec": [
               "/**",
               " * @Author: Minh Truong",
-              " * Mục đích: kiểm tra mã HTTP và toàn bộ response của ca thử.",
+              " * Mục đích: kiểm tra mã HTTP và các trường Task 2 trong response mở rộng của ca thử.",
               " * Bước 1: Đọc response JSON.",
               " * Bước 2: Thay biến ID bằng giá trị của dữ liệu thử nghiệm.",
               " * Bước 3: So sánh kết quả; lỗi phải được báo thay vì coi là đạt.",
               " */",
               "pm.test('TC17: HTTP 400', function () { pm.response.to.have.status(400); });",
               "const expected = JSON.parse(pm.variables.replaceIn(\"{\\\"message\\\":\\\"Validation failed\\\",\\\"errors\\\":[{\\\"code\\\":\\\"unrecognized_keys\\\",\\\"keys\\\":[\\\"userId\\\"],\\\"path\\\":[],\\\"message\\\":\\\"Unrecognized key: \\\\\\\"userId\\\\\\\"\\\"}]}\"));",
-              "pm.test('TC17: response đúng hợp đồng', function () { pm.expect(pm.response.json()).to.deep.equal(expected); });"
+              "pm.test('TC17: response đúng hợp đồng', function () { pm.expect(pm.response.json()).to.deep.include(expected); });"
             ]
           }
         }

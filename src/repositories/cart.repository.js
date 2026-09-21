@@ -106,9 +106,12 @@ const save = async (cart) => {
  *
  * Nếu trả về null, Service sẽ coi tồn kho bằng 0
  * và từ chối thêm vào giỏ hàng.
+ * Checkout dùng lean=true để phân biệt quantity thiếu/sai kiểu với tồn kho 0.
+ * Mặc định giữ Mongoose document cho Cart API; không thay đổi dữ liệu khi đọc.
  */
-const findInventoryByVariantId = async (variantId) => {
-  return Inventory.findOne({ variantId });
+const findInventoryByVariantId = async (variantId, { lean = false } = {}) => {
+  const query = Inventory.findOne({ variantId });
+  return lean ? query.lean() : query;
 };
 
 // Bước 6: Export các hàm cho Service sử dụng.
