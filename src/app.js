@@ -25,6 +25,9 @@ const productRoute = require("./routes/product.route");
 // Import Router quản lý Wishlist.
 const wishlistRoute = require("./routes/wishlist.route");
 
+// Import Router quản lý Cart.
+const cartRoute = require("./routes/cart.route");
+
 // Import hai Router quản lý ProductVariant.
 // File productVariant.route.js đang export hai Router riêng.
 const {
@@ -110,6 +113,9 @@ app.use("/api/products", productRoute);
 
 // Wishlist dành cho Customer.
 app.use("/api/wishlist", wishlistRoute);
+
+// Cart dành cho Customer.
+app.use("/api/cart", cartRoute);
 
 /**
  * ProductVariant.
