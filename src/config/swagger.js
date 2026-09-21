@@ -109,6 +109,76 @@ const definition = {
         type: "object", required: ["order"],
         properties: { order: { $ref: "#/components/schemas/Order" } },
       },
+      // ===== PAYMENT SCHEMAS (Task 5) =====
+      CreatePaymentInput: {
+        type: "object",
+        required: ["paymentMethod"],
+        additionalProperties: false,
+        description:
+          "Body chỉ nhận paymentMethod. Backend tự lấy amount từ Order.totalAmount, không nhận từ Frontend. " +
+          "MOMO không nằm trong danh sách vì chưa tích hợp thực tế.",
+        properties: {
+          paymentMethod: {
+            type: "string",
+            enum: ["COD", "BANK_TRANSFER"],
+            example: "COD",
+            description: "COD: thanh toán khi nhận hàng. BANK_TRANSFER: chuyển khoản, xác nhận thủ công bởi nhân viên.",
+          },
+        },
+      },
+      Payment: {
+        type: "object",
+        required: ["_id", "orderId", "amount", "paymentMethod", "status", "createdAt", "updatedAt"],
+        description:
+          "Payment record liên kết 1-1 với Order. amount lấy từ Order.totalAmount, không tính lại. " +
+          "status ban đầu luôn là pending. Chỉ STAFF/ADMIN có thể chuyển sang paid hoặc cancelled.",
+        properties: {
+          _id: { type: "string", example: "6650a1b2c3d4e5f607a8b9c0" },
+          orderId: { type: "string", example: "6650a1b2c3d4e5f607a8b900" },
+          amount: { type: "number", minimum: 0, example: 5000000, description: "Sao chép từ Order.totalAmount; không thể thay đổi." },
+          paymentMethod: { type: "string", enum: ["COD", "BANK_TRANSFER"], example: "COD" },
+          status: {
+            type: "string", enum: ["pending", "paid", "failed", "cancelled"], example: "pending",
+            description: "pending: chờ xác nhận. paid: đã xác nhận bởi STAFF/ADMIN. failed: thất bại. cancelled: đã hủy.",
+          },
+          paidAt: { type: "string", format: "date-time", nullable: true, example: null, description: "Thời điểm xác nhận; null khi chưa paid." },
+          confirmedBy: { type: "string", nullable: true, example: null, description: "userId của STAFF/ADMIN xác nhận; null khi chưa xác nhận." },
+          note: { type: "string", nullable: true, example: null, description: "Ghi chú từ nhân viên khi xác nhận." },
+          createdAt: { type: "string", format: "date-time" },
+          updatedAt: { type: "string", format: "date-time" },
+        },
+      },
+      PaymentCreated: {
+        type: "object", required: ["message", "payment"],
+        properties: {
+          message: { type: "string", example: "Payment created successfully" },
+          payment: { $ref: "#/components/schemas/Payment" },
+        },
+      },
+      PaymentDetail: {
+        type: "object", required: ["payment"],
+        properties: { payment: { $ref: "#/components/schemas/Payment" } },
+      },
+      UpdatePaymentStatusInput: {
+        type: "object",
+        required: ["status"],
+        additionalProperties: false,
+        description: "Chỉ STAFF/ADMIN được gọi. Customer không thể tự đánh dấu paid. Chỉ Payment pending mới được cập nhật.",
+        properties: {
+          status: {
+            type: "string", enum: ["paid", "cancelled"], example: "paid",
+            description: "paid: xác nhận đã nhận tiền. cancelled: hủy Payment theo quy trình.",
+          },
+          note: { type: "string", maxLength: 500, example: "GD123456 - Nguyen Van A - 21/09/2026", description: "Ghi chú tùy chọn." },
+        },
+      },
+      PaymentStatusUpdated: {
+        type: "object", required: ["message", "payment"],
+        properties: {
+          message: { type: "string", example: "Payment status updated successfully" },
+          payment: { $ref: "#/components/schemas/Payment" },
+        },
+      },
       CheckoutInput: {
         type: "object",
         required: ["addressId"],
@@ -388,6 +458,7 @@ const definition = {
     { name: "Cart", description: "Quản lý giỏ hàng" },
     { name: "Checkout", description: "Kiểm tra điều kiện checkout" },
     { name: "Order", description: "Tạo và xem chi tiết đơn hàng" },
+    { name: "Payment", description: "Quản lý thanh toán đơn hàng" },
     { name: "Category", description: "Quản lý danh mục" },
     { name: "Brand", description: "Quản lý thương hiệu" },
     { name: "Product", description: "Quản lý sản phẩm" },
@@ -1198,6 +1269,102 @@ definition.paths = {
         "itemId là _id của CartItem lấy từ GET /api/cart. " +
         "Không ảnh hưởng Inventory.",
     }),
+  },
+
+  // ===== PAYMENT API PATHS (Task 5) =====
+  "/api/orders/{orderId}/payment": {
+    post: {
+      tags: ["Payment"],
+      summary: "Customer tạo Payment cho Order của mình",
+      description:
+        "Chỉ CUSTOMER được gọi. orderId lấy từ URL; userId lấy từ JWT. " +
+        "Body chỉ gửi paymentMethod; Backend tự lấy amount từ Order.totalAmount, không nhận từ Frontend. " +
+        "Order phải tồn tại, thuộc Customer hiện tại, có totalAmount > 0 và đang ở trạng thái cho phép (pending). " +
+        "COD và BANK_TRANSFER đều tạo Payment với status='pending'; không bao giờ tự động đánh dấu 'paid'. " +
+        "Nếu Payment pending cùng method đã tồn tại (idempotent), trả Payment hiện tại. " +
+        "Nếu Payment đã paid hoặc có phương thức khác, trả 409. " +
+        "MOMO chưa tích hợp, không xuất hiện trong danh sách hợp lệ. " +
+        "Unique index trên orderId ở Model ngăn tạo hai Payment đồng thời.",
+      security: [{ bearerAuth: [] }],
+      parameters: [idParam("orderId")],
+      requestBody: requestBody("CreatePaymentInput"),
+      responses: {
+        201: checkoutResponse("Đã tạo Payment với status pending", "PaymentCreated"),
+        400: checkoutResponse("orderId sai định dạng hoặc amount không hợp lệ", "CheckoutError", {
+          invalidId: { value: { message: "Invalid order ID" } },
+          validationFailed: { value: { message: "Validation failed", errors: [{ message: "Payment method must be one of: COD, BANK_TRANSFER" }] } },
+        }),
+        401: checkoutResponse("Thiếu JWT hoặc JWT không hợp lệ/hết hạn", "CheckoutError"),
+        403: checkoutResponse("Role không phải CUSTOMER", "CheckoutError"),
+        404: checkoutResponse("Order không tồn tại hoặc không thuộc Customer", "CheckoutError", {
+          notFound: { value: { message: "Order not found" } },
+        }),
+        409: checkoutResponse("Payment đã tồn tại hoặc Order không ở trạng thái hợp lệ", "CheckoutError", {
+          alreadyPaid: { value: { message: "Payment already exists for this order with status \"paid\"" } },
+        }),
+        500: checkoutResponse("Lỗi hệ thống", "CheckoutError", { serverError: { value: { message: "Internal server error" } } }),
+      },
+    },
+    get: {
+      tags: ["Payment"],
+      summary: "Customer xem Payment của Order mình",
+      description:
+        "Chỉ CUSTOMER được gọi. Kiểm tra quyền sở hữu Order trước khi trả Payment. " +
+        "Order không tồn tại hoặc thuộc người khác đều trả 404. " +
+        "Payment chưa được tạo cũng trả 404. " +
+        "Payment Status độc lập với Order Status.",
+      security: [{ bearerAuth: [] }],
+      parameters: [idParam("orderId")],
+      responses: {
+        200: checkoutResponse("Thông tin Payment của Order", "PaymentDetail"),
+        400: checkoutResponse("orderId sai định dạng", "CheckoutError", {
+          invalidId: { value: { message: "Invalid order ID" } },
+        }),
+        401: checkoutResponse("Thiếu JWT hoặc JWT không hợp lệ/hết hạn", "CheckoutError"),
+        403: checkoutResponse("Role không phải CUSTOMER", "CheckoutError"),
+        404: checkoutResponse("Order không thuộc Customer hoặc Payment chưa tạo", "CheckoutError", {
+          orderNotFound: { value: { message: "Order not found" } },
+          paymentNotFound: { value: { message: "Payment not found" } },
+        }),
+        500: checkoutResponse("Lỗi hệ thống", "CheckoutError", { serverError: { value: { message: "Internal server error" } } }),
+      },
+    },
+  },
+  "/api/payments/{paymentId}/status": {
+    patch: {
+      tags: ["Payment"],
+      summary: "STAFF/ADMIN xác nhận hoặc hủy Payment",
+      description:
+        "Chỉ STAFF và ADMIN được gọi. Customer bị từ chối với 403. " +
+        "Xác nhận thanh toán là thao tác thủ công sau khi nhân viên kiểm tra thực tế: " +
+        "COD: đã thu tiền khi giao hàng. BANK_TRANSFER: đã đối soát giao dịch chuyển khoản. " +
+        "Chỉ Payment đang 'pending' mới được cập nhật. " +
+        "Payment đã 'paid' hoặc 'cancelled' không được thay đổi. " +
+        "confirmedBy lưu userId của nhân viên xác nhận để truy vết. " +
+        "paidAt được ghi khi status chuyển sang 'paid'. " +
+        "findOneAndUpdate với điều kiện status='pending' ngăn race condition. " +
+        "Không tự động cập nhật Order status hoặc Inventory khi xác nhận.",
+      security: [{ bearerAuth: [] }],
+      parameters: [idParam("paymentId")],
+      requestBody: requestBody("UpdatePaymentStatusInput"),
+      responses: {
+        200: checkoutResponse("Payment đã được cập nhật thành công", "PaymentStatusUpdated"),
+        400: checkoutResponse("paymentId sai định dạng hoặc body không hợp lệ", "CheckoutError", {
+          invalidId: { value: { message: "Invalid payment ID" } },
+          validationFailed: { value: { message: "Validation failed", errors: [{ message: "Status must be one of: paid, cancelled" }] } },
+        }),
+        401: checkoutResponse("Thiếu JWT hoặc JWT không hợp lệ/hết hạn", "CheckoutError"),
+        403: checkoutResponse("Role không phải STAFF hoặc ADMIN (Customer bị từ chối tại đây)", "CheckoutError"),
+        404: checkoutResponse("Payment không tồn tại", "CheckoutError", {
+          notFound: { value: { message: "Payment not found" } },
+        }),
+        409: checkoutResponse("Payment không ở trạng thái pending hoặc race condition", "CheckoutError", {
+          notPending: { value: { message: "Cannot update payment with status \"paid\". Only \"pending\" payments can be updated." } },
+          raceCondition: { value: { message: "Payment status has already been updated by another request" } },
+        }),
+        500: checkoutResponse("Lỗi hệ thống", "CheckoutError", { serverError: { value: { message: "Internal server error" } } }),
+      },
+    },
   },
 };
 // Bước 9: Tạo tài liệu OpenAPI từ cấu hình.

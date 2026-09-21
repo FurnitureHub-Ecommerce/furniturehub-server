@@ -37,6 +37,12 @@ const checkoutRoute = require("./routes/checkout.route");
 // Tạo và xem chi tiết đơn hàng của Customer.
 const orderRoute = require("./routes/order.route");
 
+// Payment: Customer tạo và xem Payment theo orderId.
+const orderPaymentRoute = require("./routes/orderPayment.route");
+
+// Payment: STAFF/ADMIN xác nhận trạng thái Payment.
+const paymentRoute = require("./routes/payment.route");
+
 // Import hai Router quản lý ProductVariant.
 // File productVariant.route.js đang export hai Router riêng.
 const {
@@ -134,6 +140,13 @@ app.use("/api/checkout", checkoutRoute);
 
 // Order lưu địa chỉ và giá tại thời điểm đặt hàng.
 app.use("/api/orders", orderRoute);
+
+// Payment: Customer tạo và xem Payment gắn với Order.
+// Mount với mergeParams để nhận orderId từ URL parent.
+app.use("/api/orders/:orderId/payment", orderPaymentRoute);
+
+// Payment: STAFF/ADMIN xác nhận hoặc hủy trạng thái Payment.
+app.use("/api/payments", paymentRoute);
 
 /**
  * Lỗi JSON xảy ra trước Router; chặn riêng cho Order để trả 400 dạng JSON.
