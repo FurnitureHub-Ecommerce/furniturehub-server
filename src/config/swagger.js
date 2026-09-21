@@ -179,10 +179,51 @@ const definition = {
           },
         },
       },
+
+      // Schema dùng cho POST và PUT Address (dữ liệu đầu vào).
+      AddressInput: {
+        type: "object",
+        required: [
+          "receiverName",
+          "phone",
+          "addressLine",
+          "ward",
+          "city",
+        ],
+        properties: {
+          receiverName: {
+            type: "string",
+            example: "Nguyen Van A",
+            description: "Tên người nhận hàng",
+          },
+          phone: {
+            type: "string",
+            example: "0912345678",
+            description:
+              "Số điện thoại Việt Nam (bắt đầu bằng 0 hoặc +84)",
+          },
+          addressLine: {
+            type: "string",
+            example: "123 Đường Lê Lợi",
+            description: "Số nhà, tên đường",
+          },
+          ward: {
+            type: "string",
+            example: "Phường Bến Nghé",
+            description: "Phường/xã",
+          },
+          city: {
+            type: "string",
+            example: "Hồ Chí Minh",
+            description: "Tỉnh/thành phố",
+          },
+        },
+      },
     },
   },
 
   tags: [
+    { name: "Address", description: "Quản lý địa chỉ giao hàng" },
     { name: "Auth", description: "Xác thực người dùng" },
     { name: "Cart", description: "Quản lý giỏ hàng" },
     { name: "Category", description: "Quản lý danh mục" },
@@ -304,6 +345,134 @@ const api = ({
  * API đọc công khai không yêu cầu đăng nhập.
  */
 definition.paths = {
+  // ================= ADDRESS =================
+
+  /**
+   * Mục đích:
+   * Khai báo tài liệu API quản lý địa chỉ giao hàng.
+   *
+   * Tất cả 6 endpoint đều yêu cầu JWT Bearer Token với role CUSTOMER.
+   * userId luôn lấy từ JWT, không từ request body.
+   *
+   * GET    /api/addresses           - Lấy danh sách địa chỉ.
+   * POST   /api/addresses           - Tạo địa chỉ mới.
+   * GET    /api/addresses/:id       - Lấy chi tiết địa chỉ.
+   * PUT    /api/addresses/:id       - Cập nhật toàn phần địa chỉ.
+   * PATCH  /api/addresses/:id/default - Đặt địa chỉ làm mặc định.
+   * DELETE /api/addresses/:id       - Xóa địa chỉ.
+   */
+  "/api/addresses": {
+    /*
+     * GET /api/addresses
+     * Lấy tất cả địa chỉ của Customer đang đăng nhập.
+     * Địa chỉ mặc định hiển thị đầu tiên.
+     * Trả mảng rỗng nếu chưa có địa chỉ nào.
+     */
+    get: api({
+      tag: "Address",
+      summary: "Customer xem danh sách địa chỉ",
+      secured: true,
+      description:
+        "Lấy tất cả địa chỉ giao hàng của Customer đang đăng nhập. " +
+        "Địa chỉ mặc định (isDefault=true) hiển thị đầu tiên. " +
+        "Trả mảng rỗng nếu chưa có địa chỉ.",
+    }),
+
+    /*
+     * POST /api/addresses
+     * Tạo địa chỉ mới.
+     * Địa chỉ đầu tiên tự động là mặc định (isDefault=true).
+     * Client không được gửi userId hoặc isDefault.
+     */
+    post: api({
+      tag: "Address",
+      summary: "Customer tạo địa chỉ mới",
+      secured: true,
+      success: 201,
+      description:
+        "Tạo địa chỉ giao hàng mới cho Customer. " +
+        "Địa chỉ đầu tiên tự động trở thành mặc định. " +
+        "userId lấy từ JWT. isDefault do Backend quyết định. " +
+        "Không được gửi userId, isDefault, _id trong body.",
+      body: requestBody("AddressInput"),
+    }),
+  },
+
+  "/api/addresses/{id}": {
+    /*
+     * GET /api/addresses/:id
+     * Xem chi tiết một địa chỉ.
+     * Trả 404 nếu không tồn tại hoặc không thuộc Customer.
+     */
+    get: api({
+      tag: "Address",
+      summary: "Customer xem chi tiết địa chỉ",
+      secured: true,
+      params: [idParam()],
+      description:
+        "Lấy chi tiết một địa chỉ theo ID. " +
+        "Trả 400 nếu ID không hợp lệ. " +
+        "Trả 404 nếu không tìm thấy hoặc không phải địa chỉ của Customer.",
+    }),
+
+    /*
+     * PUT /api/addresses/:id
+     * Cập nhật toàn phần thông tin địa chỉ.
+     * Phải gửi đủ tất cả các trường.
+     * isDefault KHÔNG thay đổi qua endpoint này.
+     */
+    put: api({
+      tag: "Address",
+      summary: "Customer cập nhật địa chỉ",
+      secured: true,
+      params: [idParam()],
+      description:
+        "Cập nhật toàn phần thông tin địa chỉ (full update). " +
+        "Phải gửi đủ receiverName, phone, addressLine, ward, city. " +
+        "isDefault không thay đổi qua endpoint này. " +
+        "Không được gửi userId, isDefault trong body (trả 400).",
+      body: requestBody("AddressInput"),
+    }),
+
+    /*
+     * DELETE /api/addresses/:id
+     * Xóa địa chỉ.
+     * Xóa địa chỉ mặc định → tự động chuyển sang địa chỉ cũ nhất còn lại.
+     * Xóa địa chỉ cuối cùng → không còn địa chỉ mặc định.
+     */
+    delete: api({
+      tag: "Address",
+      summary: "Customer xóa địa chỉ",
+      secured: true,
+      params: [idParam()],
+      description:
+        "Xóa một địa chỉ. " +
+        "Nếu xóa địa chỉ mặc định và còn địa chỉ khác, " +
+        "tự động chọn địa chỉ cũ nhất làm mặc định mới. " +
+        "Xóa địa chỉ cuối cùng không gây lỗi.",
+    }),
+  },
+
+  "/api/addresses/{id}/default": {
+    /*
+     * PATCH /api/addresses/:id/default
+     * Đặt địa chỉ làm mặc định.
+     * Địa chỉ mặc định cũ sẽ bị bỏ mặc định.
+     * Không cần request body.
+     */
+    patch: api({
+      tag: "Address",
+      summary: "Customer đặt địa chỉ làm mặc định",
+      secured: true,
+      params: [idParam()],
+      description:
+        "Đặt một địa chỉ làm mặc định. " +
+        "Địa chỉ mặc định cũ sẽ tự động bị bỏ mặc định. " +
+        "Không cần request body. " +
+        "Nếu địa chỉ đã là mặc định, trả 200 không thay đổi gì.",
+    }),
+  },
+
   // ================= AUTH =================
 
   "/api/auth/register": {
