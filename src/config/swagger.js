@@ -55,6 +55,60 @@ const definition = {
 
     // Bước 4: Schema dùng chung.
     schemas: {
+      CreateOrderInput: {
+        type: "object", required: ["addressId"], additionalProperties: false,
+        properties: {
+          addressId: { type: "string", pattern: "^[0-9a-fA-F]{24}$", example: "507f1f77bcf86cd799439011" },
+        },
+      },
+      OrderShippingAddress: {
+        type: "object", required: ["receiverName", "phone", "addressLine", "ward", "city"],
+        description: "Snapshot lúc đặt hàng, giữ nguyên khi Address bị sửa hoặc xóa",
+        properties: {
+          receiverName: { type: "string", example: "Nguyễn Văn A" },
+          phone: { type: "string", example: "0912345678" },
+          addressLine: { type: "string", example: "123 Lê Lợi" },
+          ward: { type: "string", example: "Bến Thành" },
+          city: { type: "string", example: "Hồ Chí Minh" },
+        },
+      },
+      OrderItem: {
+        type: "object", required: ["_id", "variantId", "quantity", "unitPrice", "itemSubtotal"],
+        description: "Subdocument nhúng trong Order.items; Order cha xác định quyền sở hữu item. Không có collection OrderItem riêng.",
+        properties: {
+          _id: { type: "string" },
+          variantId: { type: "string", description: "ID gốc, vẫn giữ khi Variant bị xóa" },
+          productName: { type: "string", description: "Tên sản phẩm tại thời điểm đặt hàng" },
+          sku: { type: "string" }, color: { type: "string" }, size: { type: "string" }, material: { type: "string" },
+          quantity: { type: "integer", minimum: 1 },
+          unitPrice: { type: "number", minimum: 0, description: "Giá cố định tại thời điểm đặt hàng" },
+          itemSubtotal: { type: "number", minimum: 0, description: "Thành tiền đã lưu, không tính từ giá Variant hiện tại" },
+        },
+      },
+      Order: {
+        type: "object", required: ["_id", "userId", "status", "shippingAddress", "items", "subtotal", "totalAmount", "createdAt", "updatedAt"],
+        properties: {
+          _id: { type: "string" }, userId: { type: "string" },
+          status: { type: "string", enum: ["pending"] },
+          shippingAddress: { $ref: "#/components/schemas/OrderShippingAddress" },
+          items: { type: "array", minItems: 1, items: { $ref: "#/components/schemas/OrderItem" } },
+          subtotal: { type: "number", minimum: 0 },
+          totalAmount: { type: "number", minimum: 0, description: "Bằng subtotal; không phí, thuế, giảm giá" },
+          createdAt: { type: "string", format: "date-time" },
+          updatedAt: { type: "string", format: "date-time" },
+        },
+      },
+      OrderCreated: {
+        type: "object", required: ["message", "order"],
+        properties: {
+          message: { type: "string", example: "Order created successfully" },
+          order: { $ref: "#/components/schemas/Order" },
+        },
+      },
+      OrderDetail: {
+        type: "object", required: ["order"],
+        properties: { order: { $ref: "#/components/schemas/Order" } },
+      },
       CheckoutInput: {
         type: "object",
         required: ["addressId"],
@@ -333,6 +387,7 @@ const definition = {
     { name: "Auth", description: "Xác thực người dùng" },
     { name: "Cart", description: "Quản lý giỏ hàng" },
     { name: "Checkout", description: "Kiểm tra điều kiện checkout" },
+    { name: "Order", description: "Tạo và xem chi tiết đơn hàng" },
     { name: "Category", description: "Quản lý danh mục" },
     { name: "Brand", description: "Quản lý thương hiệu" },
     { name: "Product", description: "Quản lý sản phẩm" },
@@ -452,7 +507,7 @@ const api = ({
  * API đọc công khai không yêu cầu đăng nhập.
  */
 /**
- * Mục đích: mô tả response JSON cụ thể của Checkout, dùng các schema ở trên.
+ * Mục đích: mô tả response JSON của Checkout và Order, dùng các schema ở trên.
  * Đầu vào: mô tả mã HTTP, tên schema và các ví dụ theo từng trường hợp lỗi.
  * Bước 1: Gắn kiểu nội dung JSON và tham chiếu schema.
  * Bước 2: Gắn ví dụ để Swagger UI hiển thị được response mong đợi.
@@ -469,6 +524,65 @@ const checkoutResponse = (description, schemaName, examples) => ({
 });
 
 definition.paths = {
+  // Order chỉ dành cho Customer và lưu toàn bộ snapshot trong một document.
+  "/api/orders": {
+    post: {
+      tags: ["Order"],
+      summary: "Customer tạo đơn từ Cart hiện tại",
+      description:
+        "Body chỉ nhận addressId; userId lấy từ JWT. Địa chỉ phải thuộc Customer, không cần mặc định. " +
+        "Đọc lại Cart, Product/Variant, giá và tồn kho từ database qua Task 2/3. " +
+        "Gộp quantity các dòng cùng Variant để kiểm tra Inventory.quantity. " +
+        "Có bất kỳ dòng lỗi nào đều từ chối toàn bộ đơn, trả 400 giống Checkout (kể cả thiếu hàng). " +
+        "Order có status pending, shippingAddress là snapshot năm trường địa chỉ. " +
+        "Mỗi CartItem trở thành một OrderItem với unitPrice và itemSubtotal đã tính theo giá hiện tại. " +
+        "subtotal và totalAmount bằng tổng itemSubtotal, không thêm phí/thuế/giảm giá. " +
+        "Order và toàn bộ items được nhúng và lưu bằng một insert atomic trên standalone lẫn Atlas; " +
+        "chờ xác nhận ghi majority mới trả 201, không cần transaction nhiều document. " +
+        "Không xử lý Payment, không trừ hoặc giữ Inventory, không xóa Cart. " +
+        "Chưa có chống request trùng: gọi hai lần có thể tạo hai đơn; kiểm tra tồn kho không ngăn overselling. " +
+        "Mất kết nối khi xác nhận ghi có thể trả 500 dù một đơn đầy đủ đã được lưu; không tự retry ở Service.",
+      security: [{ bearerAuth: [] }],
+      requestBody: requestBody("CreateOrderInput"),
+      responses: {
+        201: checkoutResponse("Đã lưu Order và đầy đủ items", "OrderCreated"),
+        400: checkoutResponse("Body/Cart/Product/Variant/quantity/giá/tồn kho không hợp lệ; giữ cấu trúc lỗi Checkout", "CheckoutError"),
+        401: checkoutResponse("Thiếu JWT hoặc JWT không hợp lệ/hết hạn", "CheckoutError"),
+        403: checkoutResponse("Role không phải CUSTOMER", "CheckoutError"),
+        404: checkoutResponse("Địa chỉ không tồn tại hoặc không thuộc Customer", "CheckoutError"),
+        500: checkoutResponse("Lỗi hệ thống; không trả stack hay dữ liệu nội bộ", "CheckoutError", {
+          serverError: { value: { message: "Internal server error" } },
+        }),
+      },
+    },
+  },
+  "/api/orders/{id}": {
+    get: {
+      tags: ["Order"],
+      summary: "Customer xem chi tiết đơn của mình",
+      description:
+        "Query cả _id và userId từ JWT. Đơn không tồn tại hoặc của người khác đều trả 404. " +
+        "Trả shippingAddress, items, unitPrice, itemSubtotal, subtotal, totalAmount đã lưu và timestamps. " +
+        "Không populate Address/ProductVariant/User, không tính lại tiền. " +
+        "Địa chỉ, giá và thông tin sản phẩm lịch sử vẫn còn khi nguồn bị sửa hoặc xóa.",
+      security: [{ bearerAuth: [] }],
+      parameters: [idParam()],
+      responses: {
+        200: checkoutResponse("Chi tiết đầy đủ từ snapshot của Order", "OrderDetail"),
+        400: checkoutResponse("Order ID sai định dạng", "CheckoutError", {
+          invalidId: { value: { message: "Invalid order ID" } },
+        }),
+        401: checkoutResponse("Thiếu JWT hoặc JWT không hợp lệ/hết hạn", "CheckoutError"),
+        403: checkoutResponse("Role không phải CUSTOMER", "CheckoutError"),
+        404: checkoutResponse("Đơn không tồn tại hoặc không thuộc Customer", "CheckoutError", {
+          missingOrder: { value: { message: "Order not found" } },
+        }),
+        500: checkoutResponse("Lỗi hệ thống, không trả chi tiết nội bộ", "CheckoutError", {
+          serverError: { value: { message: "Internal server error" } },
+        }),
+      },
+    },
+  },
   // Kiểm tra checkout chỉ đọc dữ liệu của Customer đang đăng nhập.
   "/api/checkout/validate": {
     post: {

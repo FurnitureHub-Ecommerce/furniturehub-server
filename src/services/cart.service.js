@@ -18,7 +18,7 @@
  * - Giá sản phẩm PHẢI lấy từ Variant.price tại Backend.
  *   Frontend không được phép gửi giá để tránh gian lận.
  * - Thêm sản phẩm vào giỏ KHÔNG làm giảm Inventory.
- *   Inventory chỉ bị trừ khi Checkout hoàn tất.
+ *   Inventory chỉ bị trừ khi kho xuất hàng; Checkout và Create Order chỉ kiểm tra.
  * - Khi Variant đã có trong giỏ, tăng quantity thay vì tạo item mới.
  *   unitPrice GIỮ NGUYÊN theo snapshot ban đầu, không cập nhật.
  *   Nếu giá đã thay đổi, nghiệp vụ Checkout sẽ kiểm tra lại.
@@ -389,7 +389,7 @@ const updateItem = async (userId, itemId, quantity) => {
  * 6. Trả về giỏ hàng sau khi xóa.
  *
  * Xóa item không ảnh hưởng Inventory.
- * Inventory chỉ giảm khi Checkout hoàn tất.
+ * Inventory chỉ giảm khi kho xuất hàng; Checkout và Create Order chỉ kiểm tra.
  *
  * CUSTOMER chỉ xóa được item trong giỏ của chính mình
  * vì Cart được tìm theo userId từ JWT.

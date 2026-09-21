@@ -96,6 +96,20 @@ const validateCheckout = async (userId, addressId) => {
   await addressService.getAddressById(userId, addressId);
 
   const cart = await cartRepository.findByUserId(userId, { lean: true });
+  return validateCart(cart);
+};
+
+/**
+ * @Author: Minh Truong
+ * Mục đích: dùng chung kiểm tra Cart cho Checkout và Create Order.
+ * Đầu vào: Cart đã populate và đọc lean, hoặc null nếu Customer chưa có giỏ.
+ * Bước 1: Từ chối Cart thiếu/rỗng bằng kết quả valid=false.
+ * Bước 2: Kiểm tra mọi dòng rồi gọi Task 3 đọc tồn kho và tính giá hiện tại.
+ * Đầu ra: kết quả gồm valid, items, totalAmount và lỗi nghiệp vụ nếu có.
+ * Không ghi dữ liệu; lỗi database được chuyển lên Controller để trả 500.
+ * Caller phải tự kiểm tra địa chỉ và đọc Cart theo userId đã xác thực.
+ */
+const validateCart = async (cart) => {
   if (!cart) {
     return { message: "Cart not found", valid: false };
   }
@@ -108,4 +122,4 @@ const validateCheckout = async (userId, addressId) => {
   return stockPriceService.calculateStockPrice(cart, itemErrors);
 };
 
-module.exports = { validateCheckout };
+module.exports = { validateCheckout, validateCart };
