@@ -7,17 +7,19 @@
  * Bước 1: Tái sử dụng Address Service và Cart Repository hiện có.
  * Bước 2: Thu thập lỗi số lượng, biến thể và sản phẩm theo từng CartItem.
  * Bước 3: Kiểm tra địa chỉ thuộc Customer và đọc Cart theo userId từ JWT.
- * Bước 4: Trả kết quả hợp lệ hoặc danh sách lỗi, không ghi dữ liệu.
+ * Bước 4: Chuyển Cart và lỗi từng item cho Task 3 kiểm tra tồn kho, tính giá hiện tại.
+ * Bước 5: Trả kết quả hợp lệ hoặc danh sách lỗi, không ghi dữ liệu.
  */
 
 const addressService = require("./address.service");
 const cartRepository = require("../repositories/cart.repository");
+const stockPriceService = require("./stockPrice.service");
 
 /**
  * Mục đích: trả tất cả lỗi nghiệp vụ của một CartItem đã populate.
  * Đầu vào: item chứa quantity, variantId và variantId.productId.
  * Bước 1: Giữ itemId để frontend nhận diện dòng lỗi, kể cả khi Variant bị xóa.
- * Bước 2: Kiểm tra quantity là số nguyên >= 1, không ép kiểu hay sửa số lượng.
+ * Bước 2: Kiểm tra quantity là số nguyên an toàn >= 1, không ép kiểu hay sửa số lượng.
  * Bước 3: Kiểm tra Variant tồn tại và isActive đúng bằng true.
  * Bước 4: Nếu có Variant, kiểm tra Product tồn tại và isActive bằng true.
  * Populate trả null khi tham chiếu bị thiếu, sai định dạng hoặc đã bị xóa.
@@ -33,11 +35,11 @@ const getItemErrors = (item) => {
     variantId: variant?._id?.toString() || null,
   };
 
-  if (!Number.isInteger(item?.quantity) || item.quantity < 1) {
+  if (!Number.isSafeInteger(item?.quantity) || item.quantity < 1) {
     errors.push({
       ...identity,
       code: "INVALID_QUANTITY",
-      message: "Quantity must be an integer greater than or equal to 1",
+      message: "Quantity must be a safe integer greater than or equal to 1",
     });
   }
 
@@ -83,10 +85,12 @@ const getItemErrors = (item) => {
  * Bước 2: Đọc Cart với tùy chọn lean để giữ nguyên kiểu dữ liệu đã lưu.
  * Không gọi getCart vì hàm đó tính tiền; không gọi findOrCreate vì có ghi dữ liệu.
  * Bước 3: Cart chưa tồn tại hoặc không có item trả valid=false (HTTP 400).
- * Bước 4: Duyệt toàn bộ item và gom lỗi; có bất kỳ lỗi nào thì không thành công.
+ * Bước 4: Duyệt toàn bộ item và chuyển lỗi cùng Cart cho Stock Price Service.
+ * Task 3 kiểm tra Inventory.quantity, gộp Variant trùng và tính giá hiện tại.
+ * Có bất kỳ lỗi nào thì valid=false và không trả tổng tiền được xác nhận.
  * Lỗi truy vấn được chuyển lên Controller để trả thông báo hệ thống chung.
  * Kết quả chỉ phản ánh thời điểm đọc, không giữ hàng hay bảo đảm giá/tồn kho.
- * Task 4 phải kiểm tra lại điều kiện khi tạo đơn; Task 3 phụ trách tồn kho và giá.
+ * Task 4 phải kiểm tra lại địa chỉ, sản phẩm, giá và tồn kho khi tạo đơn.
  */
 const validateCheckout = async (userId, addressId) => {
   await addressService.getAddressById(userId, addressId);
@@ -100,12 +104,8 @@ const validateCheckout = async (userId, addressId) => {
     return { message: "Cart is empty", valid: false };
   }
 
-  const errors = cart.items.flatMap(getItemErrors);
-  if (errors.length > 0) {
-    return { message: "Cart is invalid for checkout", valid: false, errors };
-  }
-
-  return { message: "Cart is valid for checkout", valid: true };
+  const itemErrors = cart.items.map(getItemErrors);
+  return stockPriceService.calculateStockPrice(cart, itemErrors);
 };
 
 module.exports = { validateCheckout };

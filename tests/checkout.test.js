@@ -7,7 +7,7 @@
  * Bước 1: Tạo dữ liệu độc lập và JWT ký bằng khóa ngẫu nhiên chỉ dùng trong test.
  * Bước 2: Chạy Express, JWT, Zod, Service, Repository và populate Mongoose thật.
  * Bước 3: Thay thao tác đọc collection bằng dữ liệu mô phỏng; chặn mọi thao tác ghi.
- * Bước 4: Chạy TC01–TC17, kiểm tra biên, hồi quy Cart/Address và tài liệu Swagger.
+ * Bước 4: Chạy Task 2 và TC01–TC22 Task 3, kiểm tra biên tiền/tồn kho và hồi quy.
  * Bước 5: Đóng HTTP server và khôi phục biến môi trường, không đọc hay sửa .env.
  * Giới hạn: bộ test không chứng minh kết nối hoặc hành vi MongoDB server thực tế.
  */
@@ -45,8 +45,8 @@ const previousSecret = process.env.JWT_SECRET;
 /**
  * Tạo trạng thái hợp lệ trước mỗi test để trường hợp trước không ảnh hưởng sau.
  * Địa chỉ thứ hai thuộc Customer khác; Cart chứa đúng một Variant đang bán.
- * unitPrice cố tình khác giá hiện tại và Inventory không có bản ghi:
- * Task 2 vẫn phải thành công vì kiểm tra giá/tồn kho thuộc Task 3.
+ * unitPrice cố tình khác giá hiện tại để phát hiện việc dùng snapshot tính checkout.
+ * Inventory đủ hàng; mỗi test thay đổi bản sao để kiểm tra điều kiện thất bại.
  */
 const createDatabase = () => ({
   Address: [
@@ -56,6 +56,7 @@ const createDatabase = () => ({
   Cart: [{ _id: ids.cart, userId: ids.customer, items: [{ _id: ids.item, variantId: ids.variant, quantity: 2, unitPrice: 100 }], updatedAt: new Date("2026-01-01") }],
   ProductVariant: [{ _id: ids.variant, productId: ids.product, sku: "CHAIR-TEST", isActive: true, price: 999 }],
   Product: [{ _id: ids.product, name: "Test chair", isActive: true, images: [] }],
+  Inventory: [{ _id: oid("b"), variantId: ids.variant, quantity: 10 }],
 });
 
 /**
@@ -76,10 +77,10 @@ const matches = (document, filter) => Object.entries(filter).every(([field, valu
  * Mỗi lần đọc trả bản sao BSON, tránh populate làm biến đổi dữ liệu gốc.
  * Ghi lại filter để xác nhận Cart/Address luôn được giới hạn theo người dùng.
  * Chặn save và các thao tác ghi trên toàn bộ model; bất kỳ lần gọi nào cũng lỗi.
- * Inventory bị chặn cả đọc vì Task 2 không thực hiện kiểm tra tồn kho.
+ * Inventory cũng được đọc qua Mongoose thật để kiểm tra quantity và truy vấn trùng.
  */
 const installDatabaseMocks = () => {
-  for (const model of [Cart, Address, ProductVariant, Product]) {
+  for (const model of [Cart, Address, ProductVariant, Product, Inventory]) {
     const read = (filter, method) => {
       reads.push({ model: model.modelName, method, filter: clone(filter) });
       return database[model.modelName].filter((document) => matches(document, filter)).map(clone);
@@ -97,12 +98,6 @@ const installDatabaseMocks = () => {
     for (const method of ["insertOne", "insertMany", "updateOne", "updateMany", "replaceOne", "deleteOne", "deleteMany", "findOneAndUpdate", "findOneAndDelete", "bulkWrite"]) {
       mock.method(model.collection, method, rejectWrite);
     }
-  }
-  for (const method of ["findOne", "find", "aggregate"]) {
-    mock.method(Inventory.collection, method, () => {
-      reads.push({ model: "Inventory", method });
-      throw new Error("Task 2 must not query Inventory");
-    });
   }
 };
 
@@ -127,7 +122,6 @@ beforeEach(() => {
 afterEach(() => {
   mock.restoreAll();
   assert.equal(writeAttempts, 0, "Checkout không được ghi dữ liệu");
-  assert.equal(reads.some((read) => read.model === "Inventory"), false);
 });
 
 after(async () => {
@@ -142,12 +136,15 @@ after(async () => {
  * Có thể thêm query để kiểm tra userId/cartId phía client không chọn được giỏ khác.
  */
 const checkout = async (body = { addressId: String(ids.address) }, token = customerToken, query = "") => {
+  const beforeRequest = structuredClone(database);
   const response = await fetch(`${baseUrl}/api/checkout/validate${query}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     body: JSON.stringify(body),
   });
-  return { status: response.status, body: await response.json() };
+  const result = { status: response.status, body: await response.json() };
+  assert.deepEqual(structuredClone(database), beforeRequest, "Checkout không được thay đổi dữ liệu");
+  return result;
 };
 
 /**
@@ -164,9 +161,14 @@ const assertItemError = (response, code) => {
   assert.equal(typeof error.message, "string");
 };
 
-test("TC01: Cart và Address hợp lệ; không tính giá hoặc đọc tồn kho", async () => {
+test("TC01 / T3-TC01: Cart hợp lệ, tính giá hiện tại và kiểm tra tồn kho", async () => {
   const beforeRequest = clone(database);
-  assert.deepEqual(await checkout(), { status: 200, body: { message: "Cart is valid for checkout", valid: true } });
+  assert.deepEqual(await checkout(), { status: 200, body: {
+    message: "Cart is valid for checkout", valid: true,
+    items: [{ itemId: String(ids.item), variantId: String(ids.variant), quantity: 2,
+      requestedQuantity: 2, availableStock: 10, unitPrice: 999, itemSubtotal: 1998,
+      stockValid: true, valid: true }], totalAmount: 1998,
+  } });
   assert.deepEqual(database, beforeRequest);
   const addressRead = reads.find((entry) => entry.model === "Address");
   assert.equal(String(addressRead.filter._id), String(ids.address));
@@ -270,7 +272,7 @@ test("TC17: Gửi userId của người khác bị từ chối 400", async () =>
 });
 
 test("Chặn mọi trường ngoài addressId, kể cả giá và tồn kho", async () => {
-  for (const field of ["cartId", "price", "unitPrice", "totalAmount", "stockQuantity", "quantity", "extra"]) {
+  for (const field of ["cartId", "price", "unitPrice", "totalPrice", "subtotal", "grandTotal", "totalAmount", "stockQuantity", "quantity", "extra"]) {
     const response = await checkout({ addressId: String(ids.address), [field]: 123 });
     assert.equal(response.status, 400);
     assert.deepEqual(response.body.errors[0].keys, [field]);
@@ -385,4 +387,191 @@ test("Swagger phục vụ được và khai báo đầy đủ endpoint Checkout"
   assert.equal(swaggerSpec.components.schemas.CheckoutInput.additionalProperties, false);
   assert.ok(swaggerSpec.paths["/api/cart"].get);
   assert.ok(swaggerSpec.paths["/api/addresses"].get);
+  assert.ok(operation.responses[400].content["application/json"].examples.insufficientStock);
+  assert.ok(swaggerSpec.components.schemas.CheckoutResult.required.includes("totalAmount"));
+});
+
+/**
+ * Các ca Task 3 dưới đây kiểm tra dữ liệu trả về, không chỉ kiểm tra mã HTTP.
+ * Lỗi từng item phải giữ ID, valid=false và totalAmount=null để tránh dùng tổng dở dang.
+ * Dữ liệu hỏng được đưa vào collection mô phỏng để không bị schema tự sửa trước test.
+ * Các ca JWT/role/quyền sở hữu/Cart rỗng/Variant và Product phía trên được dùng lại.
+ */
+test("T3-TC04: Số lượng bằng tồn kho vẫn hợp lệ", async () => {
+  database.Inventory[0].quantity = 2;
+  const response = await checkout();
+  assert.equal(response.status, 200);
+  assert.equal(response.body.items[0].stockValid, true);
+});
+
+test("T3-TC05/06: Thiếu hàng và hết hàng trả lượng tồn thực tế", async () => {
+  for (const stock of [1, 0]) {
+    database.Inventory[0].quantity = stock;
+    const response = await checkout();
+    assertItemError(response, "INSUFFICIENT_STOCK");
+    assert.equal(response.body.totalAmount, null);
+    assert.equal(response.body.items[0].availableStock, stock);
+    assert.equal(response.body.items[0].requestedQuantity, 2);
+    assert.equal(response.body.items[0].stockValid, false);
+  }
+});
+
+test("T3-TC07: Inventory thiếu được phân biệt với tồn kho 0", async () => {
+  database.Inventory = [];
+  const response = await checkout();
+  assertItemError(response, "INVENTORY_NOT_FOUND");
+  assert.equal(response.body.items[0].availableStock, null);
+  assert.equal(response.body.totalAmount, null);
+});
+
+test("T3: Inventory quantity sai kiểu, thiếu, âm, lẻ hoặc vượt giới hạn", async () => {
+  for (const value of [undefined, null, "10", -1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+    database.Inventory[0].quantity = value;
+    const response = await checkout();
+    assertItemError(response, "INVALID_STOCK");
+    assert.equal(response.body.items[0].availableStock, null);
+    assert.equal(response.body.totalAmount, null);
+  }
+});
+
+/**
+ * Thêm Variant độc lập, số lượng 3 và giá hiện tại 2000 để kiểm tra tổng nhiều dòng.
+ * Snapshot cố tình bằng 1; Product dùng lại vì hai Variant có thể cùng một sản phẩm.
+ */
+const addSecondVariant = () => {
+  const variantId = oid("c");
+  database.ProductVariant.push({ _id: variantId, productId: ids.product, isActive: true, price: 2000 });
+  database.Inventory.push({ _id: oid("d"), variantId, quantity: 3 });
+  database.Cart[0].items.push({ _id: ids.secondItem, variantId, quantity: 3, unitPrice: 1 });
+};
+
+test("T3-TC12: Tổng bằng tổng thành tiền của nhiều Variant", async () => {
+  addSecondVariant();
+  const response = await checkout();
+  assert.equal(response.status, 200);
+  assert.deepEqual(response.body.items.map((item) => item.itemSubtotal), [1998, 6000]);
+  assert.equal(response.body.totalAmount, 7998);
+});
+
+test("T3-TC13: Một dòng thiếu hàng làm cả Cart không hợp lệ", async () => {
+  addSecondVariant();
+  database.Inventory[1].quantity = 1;
+  const response = await checkout();
+  assert.equal(response.status, 400);
+  assert.equal(response.body.valid, false);
+  assert.equal(response.body.totalAmount, null);
+  assert.equal(response.body.items.length, 2);
+  assert.equal(response.body.items[0].valid, true);
+  assert.equal(response.body.items[1].valid, false);
+  assert.equal(response.body.errors[0].itemId, String(ids.secondItem));
+});
+
+test("T3-TC14: Giá thay đổi được đọc lại, Cart vẫn dùng snapshot cũ", async () => {
+  database.Cart[0].items[0].unitPrice = 1000000;
+  database.ProductVariant[0].price = 1200000;
+  assert.equal((await checkout()).body.totalAmount, 2400000);
+  database.ProductVariant[0].price = 1500000;
+  assert.equal((await checkout()).body.totalAmount, 3000000);
+  const response = await fetch(`${baseUrl}/api/cart`, { headers: { Authorization: `Bearer ${customerToken}` } });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).cart.totalAmount, 2000000);
+});
+
+test("T3-TC15: Giá thiếu, sai kiểu, âm, vô hạn hoặc vượt giới hạn", async () => {
+  for (const price of [undefined, null, "999", -1, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+    database.ProductVariant[0].price = price;
+    const response = await checkout();
+    assertItemError(response, "INVALID_PRICE");
+    assert.equal(response.body.items[0].unitPrice, null);
+    assert.equal(response.body.items[0].itemSubtotal, null);
+    assert.equal(response.body.totalAmount, null);
+  }
+});
+
+test("T3: Giá bằng 0 hợp lệ theo schema", async () => {
+  database.ProductVariant[0].price = 0;
+  const response = await checkout();
+  assert.equal(response.status, 200);
+  assert.equal(response.body.totalAmount, 0);
+});
+
+test("T3: Nhân và cộng giá thập phân không gây sai số số thực", async () => {
+  addSecondVariant();
+  database.ProductVariant[0].price = 0.1;
+  database.ProductVariant[1].price = 0.2;
+  const response = await checkout();
+  assert.equal(response.status, 200);
+  assert.deepEqual(response.body.items.map((item) => item.itemSubtotal), [0.2, 0.6]);
+  assert.equal(response.body.totalAmount, 0.8);
+  database.ProductVariant[0].price = 1e-7;
+  database.ProductVariant[1].price = 1e-7;
+  assert.equal((await checkout()).body.totalAmount, 5e-7);
+});
+
+test("T3: Thành tiền và tổng vượt giới hạn không được xác nhận", async () => {
+  database.ProductVariant[0].price = Number.MAX_SAFE_INTEGER;
+  const invalidLine = await checkout();
+  assertItemError(invalidLine, "INVALID_ITEM_TOTAL");
+  assert.equal(invalidLine.body.totalAmount, null);
+  database.Cart[0].items[0].quantity = 1;
+  addSecondVariant();
+  const invalidTotal = await checkout();
+  assert.equal(invalidTotal.status, 400);
+  assert.equal(invalidTotal.body.totalAmount, null);
+  assert.ok(invalidTotal.body.errors.some((error) => error.code === "INVALID_TOTAL"));
+});
+
+test("T3: Từ chối tiền bị mất chữ số khi đổi về JSON Number", async () => {
+  database.ProductVariant[0].price = 0.1234567890123456;
+  database.Cart[0].items[0].quantity = 9;
+  assertItemError(await checkout(), "INVALID_ITEM_TOTAL");
+});
+
+test("T3-TC21: Gọi lặp lại không thay đổi Cart, giá hoặc tồn kho", async () => {
+  const beforeRequest = clone(database);
+  const first = await checkout();
+  const second = await checkout();
+  assert.equal(first.status, 200);
+  assert.deepEqual(first, second);
+  assert.deepEqual(database, beforeRequest);
+});
+
+test("T3-TC22: Gộp Variant trùng và chỉ đọc Inventory một lần", async () => {
+  database.Cart[0].items.push({ _id: ids.secondItem, variantId: ids.variant, quantity: 2, unitPrice: 10 });
+  database.Inventory[0].quantity = 3;
+  const response = await checkout();
+  assertItemError(response, "INSUFFICIENT_STOCK");
+  assert.equal(response.body.errors.length, 2);
+  assert.ok(response.body.items.every((item) => item.requestedQuantity === 4 && !item.stockValid));
+  assert.equal(reads.filter((read) => read.model === "Inventory").length, 1);
+  database.Inventory[0].quantity = 4;
+  const validResponse = await checkout();
+  assert.equal(validResponse.status, 200);
+  assert.equal(validResponse.body.totalAmount, 3996);
+});
+
+test("T3: Số lượng riêng lẻ và số lượng gộp phải an toàn", async () => {
+  database.Cart[0].items[0].quantity = Number.MAX_SAFE_INTEGER + 1;
+  assertItemError(await checkout(), "INVALID_QUANTITY");
+  database.Cart[0].items[0].quantity = Number.MAX_SAFE_INTEGER;
+  database.ProductVariant[0].price = 0;
+  database.Inventory[0].quantity = Number.MAX_SAFE_INTEGER;
+  database.Cart[0].items.push({ _id: ids.secondItem, variantId: ids.variant, quantity: 1, unitPrice: 0 });
+  const response = await checkout();
+  assertItemError(response, "INVALID_QUANTITY_TOTAL");
+  assert.ok(response.body.items.every((item) => !item.stockValid));
+});
+
+test("T3: Dòng CartItem null vẫn được báo lỗi", async () => {
+  database.Cart[0].items.push(null);
+  const response = await checkout();
+  assert.equal(response.status, 400);
+  assert.equal(response.body.items.length, 2);
+  assert.equal(response.body.items[1].valid, false);
+  assert.equal(response.body.totalAmount, null);
+});
+
+test("T3: Lỗi database khi đọc Inventory được ẩn trong response 500", async () => {
+  mock.method(Inventory.collection, "findOne", async () => { throw new Error("private inventory connection string"); });
+  assert.deepEqual(await checkout(), { status: 500, body: { message: "Internal server error" } });
 });

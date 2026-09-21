@@ -8,6 +8,8 @@ Bước 3: phân biệt kết quả đã chạy với kiểm thử cần MongoDB
 
 # Task 2 — Checkout + Cart Validation
 
+> **Cập nhật Task 3:** endpoint này hiện kiểm tra thêm Inventory và tính giá hiện tại, trả `items` cùng `totalAmount`. Chi tiết hợp đồng mới và TC01–TC22 ở [stock-price-validation.md](stock-price-validation.md). Nội dung Task 2 phía dưới ghi lại phạm vi/hợp đồng trước khi mở rộng. Collection đi kèm đã đổi assertion sang kiểm tra các trường Task 2 trong response mở rộng; fixture hợp lệ phải có Inventory đủ hàng và giá hợp lệ. Lỗi quantity hiện yêu cầu số nguyên **an toàn**. Kết quả 31/31 bên dưới là kết quả lịch sử Task 2.
+
 ## Cấu trúc và phần được tái sử dụng
 
 - CartItem là subdocument trong `Cart.items`, không có model/collection CartItem riêng.
