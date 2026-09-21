@@ -34,6 +34,9 @@ const addressRoute = require("./routes/address.route");
 // Import Router kiểm tra điều kiện checkout.
 const checkoutRoute = require("./routes/checkout.route");
 
+// Tạo và xem chi tiết đơn hàng của Customer.
+const orderRoute = require("./routes/order.route");
+
 // Import hai Router quản lý ProductVariant.
 // File productVariant.route.js đang export hai Router riêng.
 const {
@@ -128,6 +131,21 @@ app.use("/api/addresses", addressRoute);
 
 // Kiểm tra địa chỉ và giỏ hàng trước khi Customer tiếp tục checkout.
 app.use("/api/checkout", checkoutRoute);
+
+// Order lưu địa chỉ và giá tại thời điểm đặt hàng.
+app.use("/api/orders", orderRoute);
+
+/**
+ * Lỗi JSON xảy ra trước Router; chặn riêng cho Order để trả 400 dạng JSON.
+ * Không để Express trả trang lỗi chứa stack khi body bị hỏng hoặc là null.
+ * Các lỗi khác tiếp tục đi theo cơ chế xử lý hiện tại của ứng dụng.
+ */
+app.use("/api/orders", (error, req, res, next) => {
+  if (error.type === "entity.parse.failed") {
+    return res.status(400).json({ message: "Invalid JSON body" });
+  }
+  return next(error);
+});
 
 /**
  * ProductVariant.
