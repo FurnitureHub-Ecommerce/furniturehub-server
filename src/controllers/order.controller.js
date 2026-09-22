@@ -10,7 +10,7 @@ const orderService = require("../services/order.service");
  * Các lỗi database hoặc lỗi ngoài dự kiến trả 500 chung, không gửi stack/URI.
  */
 const handleError = (res, error) => {
-  const statusCode = [400, 404, 409].includes(error.statusCode) ? error.statusCode : 500;
+  const statusCode = [400, 403, 404, 409].includes(error.statusCode) ? error.statusCode : 500;
   if (statusCode === 400 && error.details) return res.status(400).json(error.details);
   return res.status(statusCode).json({
     message: statusCode === 500 ? "Internal server error" : error.message,
@@ -47,12 +47,12 @@ const getOrderById = async (req, res) => {
 
 /**
  * Chuyển ID và status đã validate tới Service sau khi Route kiểm tra STAFF/ADMIN.
- * Sau Task 2: confirmed/rejected được delegate sang confirmOrder/rejectOrder Service.
- * cancelled vẫn bị chặn cho đến Task 3. Controller không tự ghi status.
+ * Sau Task 2 & Task 3: confirmed/rejected/cancelled được delegate sang Service chuyên biệt.
+ * Controller không tự ghi status.
  */
 const updateOrderStatus = async (req, res) => {
   try {
-    const order = await orderService.updateOrderStatus(req.params.id, req.body.status);
+    const order = await orderService.updateOrderStatus(req.params.id, req.body.status, req.user);
     return res.status(200).json({ message: "Order status updated successfully", order });
   } catch (error) {
     return handleError(res, error);
@@ -97,4 +97,36 @@ const rejectOrder = async (req, res) => {
   }
 };
 
-module.exports = { createOrder, getOrderById, updateOrderStatus, confirmOrder, rejectOrder };
+/**
+ * @Author: Minh Truong
+ *
+ * Mục đích:
+ * Hủy đơn hàng (pending → cancelled) bởi CUSTOMER (chính chủ), STAFF hoặc ADMIN.
+ * Nhận id từ URL đã qua validateOrderId; không cần body.
+ * Gọi Service thực hiện đầy đủ nghiệp vụ:
+ * - Kiểm tra quyền sở hữu (CUSTOMER chỉ hủy đơn của chính mình).
+ * - Kiểm tra trạng thái pending hợp lệ.
+ * - Kiểm tra tình trạng thanh toán và nghiệp vụ tồn kho.
+ * - Cập nhật Order an toàn với điều kiện status=pending để ngăn race condition.
+ * Thành công trả 200 với { message, data }; mọi lỗi đi qua handleError.
+ */
+const cancelOrder = async (req, res) => {
+  try {
+    const order = await orderService.cancelOrder(req.params.id, req.user);
+    return res.status(200).json({
+      message: "Order cancelled successfully",
+      data: order,
+    });
+  } catch (error) {
+    return handleError(res, error);
+  }
+};
+
+module.exports = {
+  createOrder,
+  getOrderById,
+  updateOrderStatus,
+  confirmOrder,
+  rejectOrder,
+  cancelOrder,
+};
