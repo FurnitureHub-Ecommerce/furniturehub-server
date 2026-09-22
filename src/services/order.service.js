@@ -1,6 +1,6 @@
 /**
  * @Author: Minh Truong
- * Mục đích: tạo và đọc đơn của Customer bằng snapshot tại thời điểm đặt hàng.
+ * Mục đích: tạo, đọc đơn của Customer và kiểm soát yêu cầu đổi trạng thái.
  * Tái sử dụng Address Service, Cart Repository và kiểm tra Checkout/Task 3.
  * Chỉ ghi một document Order chứa đầy đủ items để không cần transaction nhiều document.
  */
@@ -9,6 +9,7 @@ const addressService = require("./address.service");
 const cartRepository = require("../repositories/cart.repository");
 const checkoutService = require("./checkout.service");
 const { orderIdSchema } = require("../validators/order.validator");
+const { ORDER_STATUSES, ORDER_STATUS_TRANSITIONS } = require("../constants/orderStatus");
 
 /**
  * Đầu vào: userId từ JWT và addressId đã qua Zod.
@@ -94,4 +95,77 @@ const getOrderById = async (userId, orderId) => {
   return order;
 };
 
-module.exports = { createOrder, getOrderById };
+/**
+ * Kiểm tra quy tắc chuyển trạng thái tập trung để Task 2 và Task 3 tái sử dụng.
+ * Bước 1: Từ chối trạng thái đích ngoài enum bằng 400, kể cả khi gọi Service trực tiếp.
+ * Bước 2: Cùng trạng thái trả 409; không coi yêu cầu lặp là cập nhật thành công.
+ * Bước 3: Chỉ chấp nhận pending sang confirmed/rejected/cancelled theo bảng quy tắc.
+ * Trạng thái nguồn lạ hoặc mọi đường chuyển khác đều trả 409.
+ * Hàm này chỉ kiểm tra quy tắc, không cấp phép bỏ qua nghiệp vụ hoặc ghi database.
+ */
+const assertOrderStatusTransition = (currentStatus, nextStatus) => {
+  if (!ORDER_STATUSES.includes(nextStatus)) {
+    const error = new Error("Invalid order status");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (currentStatus === nextStatus) {
+    const error = new Error(`Order already has status "${currentStatus}"`);
+    error.statusCode = 409;
+    throw error;
+  }
+
+  if (
+    !ORDER_STATUSES.includes(currentStatus) ||
+    !ORDER_STATUS_TRANSITIONS[currentStatus].includes(nextStatus)
+  ) {
+    const error = new Error(`Cannot change order status from "${currentStatus}" to "${nextStatus}"`);
+    error.statusCode = 409;
+    throw error;
+  }
+};
+
+/**
+ * Tiếp nhận yêu cầu cập nhật từ STAFF/ADMIN đã được Route phân quyền.
+ * Bước 1: Kiểm tra ID và status trước truy vấn, kể cả khi gọi Service trực tiếp.
+ * Bước 2: Tìm Order theo ID; nhân viên không bị giới hạn bởi chủ đơn. Thiếu trả 404.
+ * Bước 3: Kiểm tra trạng thái lặp và bảng quy tắc qua hàm dùng chung.
+ * Bước 4: Chặn bằng 409 vì chưa có Confirm/Reject (Task 2), Cancel (Task 3)
+ * hoặc xử lý kho (Task 4). Đổi enum đơn thuần không hoàn thành các nghiệp vụ này.
+ *
+ * Task 1 không có đường ghi: hai yêu cầu đồng thời đều bị chặn, không ghi đè nhau.
+ * Khi bổ sung nghiệp vụ, phải cập nhật có điều kiện {_id: orderId, status: order.status}
+ * bằng findOneAndUpdate với runValidators và trả 409 nếu không còn khớp.
+ * Việc ghi Order và thay đổi kho phải cùng được bảo đảm nhất quán trong nghiệp vụ;
+ * không thay lỗi bên dưới bằng một lệnh save chỉ đổi status hoặc cờ bỏ qua kiểm tra.
+ */
+const updateOrderStatus = async (orderId, status) => {
+  if (!orderIdSchema.safeParse(orderId).success) {
+    const error = new Error("Invalid order ID");
+    error.statusCode = 400;
+    throw error;
+  }
+  if (!ORDER_STATUSES.includes(status)) {
+    const error = new Error("Invalid order status");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const order = await Order.findById(orderId).select("_id status").lean();
+  if (!order) {
+    const error = new Error("Order not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  assertOrderStatusTransition(order.status, status);
+
+  const error = new Error(
+    `Order status transition to "${status}" is not available until the corresponding order workflow is implemented`
+  );
+  error.statusCode = 409;
+  throw error;
+};
+
+module.exports = { createOrder, getOrderById, assertOrderStatusTransition, updateOrderStatus };

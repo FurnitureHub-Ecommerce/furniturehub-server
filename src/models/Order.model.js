@@ -11,6 +11,7 @@
  * Không có Payment, giữ hàng hay thao tác cập nhật Cart trong model này.
  */
 const mongoose = require("mongoose");
+const { ORDER_STATUSES } = require("../constants/orderStatus");
 
 const shippingAddressSchema = new mongoose.Schema({
   receiverName: { type: String, required: true, trim: true },
@@ -44,7 +45,9 @@ const orderSchema = new mongoose.Schema({
       message: "Order must contain all ordered items",
     },
   },
-  status: { type: String, enum: ["pending"], default: "pending", required: true },
+  // Enum chỉ kiểm tra giá trị lưu; quy tắc chuyển và nghiệp vụ do Order Service kiểm tra.
+  // Đơn mới vẫn là pending; thêm cancelled để chuẩn bị quy tắc hủy của Task 3.
+  status: { type: String, enum: ORDER_STATUSES, default: "pending", required: true },
   subtotal: { type: Number, required: true, min: 0, max: Number.MAX_SAFE_INTEGER, validate: Number.isFinite, immutable: true },
   totalAmount: { type: Number, required: true, min: 0, max: Number.MAX_SAFE_INTEGER, validate: Number.isFinite, immutable: true },
 }, { timestamps: true });
