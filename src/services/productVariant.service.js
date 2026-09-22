@@ -29,6 +29,7 @@ const mongoose = require("mongoose");
 const productRepository = require("../repositories/product.repository");
 
 const variantRepository = require("../repositories/productVariant.repository");
+const availabilityService = require("./availability.service");
 
 /**
  * Bước 2: Tạo lỗi nghiệp vụ.
@@ -54,10 +55,7 @@ const makeError = (message, statusCode) => {
  * - Nếu không hợp lệ, trả lỗi 400.
  */
 const validateId = (id) => {
-  if (
-    typeof id !== "string" ||
-    !/^[0-9a-fA-F]{24}$/.test(id)
-  ) {
+  if (typeof id !== "string" || !/^[0-9a-fA-F]{24}$/.test(id)) {
     throw makeError("Invalid ID", 400);
   }
 };
@@ -116,20 +114,12 @@ const normalizeAttribute = (value) => {
  * SKU phải duy nhất trên toàn hệ thống,
  * kể cả với Variant đã bị vô hiệu hóa.
  */
-const checkDuplicateSku = async (
-  sku,
-  excludeId = null
-) => {
+const checkDuplicateSku = async (sku, excludeId = null) => {
   const normalizedSku = sku.trim().toUpperCase();
 
-  const existing = await variantRepository.findBySku(
-    normalizedSku
-  );
+  const existing = await variantRepository.findBySku(normalizedSku);
 
-  if (
-    existing &&
-    existing._id.toString() !== excludeId?.toString()
-  ) {
+  if (existing && existing._id.toString() !== excludeId?.toString()) {
     throw makeError("SKU already exists", 409);
   }
 };
@@ -153,31 +143,21 @@ const checkDuplicateSku = async (
  * Variant đã xóa mềm vẫn được kiểm tra để
  * tránh tạo bản ghi trùng dữ liệu cũ.
  */
-const checkDuplicateCombination = async (
-  productId,
-  data,
-  excludeId = null
-) => {
-  const variants = await variantRepository.findByProductId(
-    productId
-  );
+const checkDuplicateCombination = async (productId, data, excludeId = null) => {
+  const variants = await variantRepository.findByProductId(productId);
 
   const duplicate = variants.find((variant) => {
     // Bỏ qua Variant đang được cập nhật.
-    if (
-      variant._id.toString() === excludeId?.toString()
-    ) {
+    if (variant._id.toString() === excludeId?.toString()) {
       return false;
     }
 
     // So sánh từng thuộc tính sau khi chuẩn hóa.
     const sameColor =
-      normalizeAttribute(variant.color) ===
-      normalizeAttribute(data.color);
+      normalizeAttribute(variant.color) === normalizeAttribute(data.color);
 
     const sameSize =
-      normalizeAttribute(variant.size) ===
-      normalizeAttribute(data.size);
+      normalizeAttribute(variant.size) === normalizeAttribute(data.size);
 
     const sameMaterial =
       normalizeAttribute(variant.material) ===
@@ -188,10 +168,7 @@ const checkDuplicateCombination = async (
   });
 
   if (duplicate) {
-    throw makeError(
-      "Variant combination already exists",
-      409
-    );
+    throw makeError("Variant combination already exists", 409);
   }
 };
 
@@ -205,16 +182,11 @@ const checkDuplicateCombination = async (
  * - Public chỉ lấy Variant đang hoạt động.
  * - Trả về danh sách Variant.
  */
-const getByProductId = async (
-  productId,
-  isAdmin = false
-) => {
+const getByProductId = async (productId, isAdmin = false) => {
   if (isAdmin) {
     validateId(productId);
 
-    const product = await productRepository.findById(
-      productId
-    );
+    const product = await productRepository.findById(productId);
 
     if (!product) {
       throw makeError("Product not found", 404);
@@ -225,10 +197,8 @@ const getByProductId = async (
 
   const filter = isAdmin ? {} : { isActive: true };
 
-  return variantRepository.findByProductId(
-    productId,
-    filter
-  );
+  const variants = await variantRepository.findByProductId(productId, filter);
+  return availabilityService.withVariantStock(variants);
 };
 
 /**
@@ -258,7 +228,8 @@ const getById = async (id, isAdmin = false) => {
     await validateProduct(variant.productId.toString());
   }
 
-  return variant;
+  const [variantWithStock] = await availabilityService.withVariantStock([variant]);
+  return variantWithStock;
 };
 
 /**
@@ -290,10 +261,7 @@ const create = async (productId, data) => {
 
   await checkDuplicateSku(variantData.sku);
 
-  await checkDuplicateCombination(
-    productId,
-    variantData
-  );
+  await checkDuplicateCombination(productId, variantData);
 
   return variantRepository.create(variantData);
 };
@@ -347,14 +315,9 @@ const update = async (id, data) => {
 
   // Chuẩn hóa SKU nếu có thay đổi.
   if (updateData.sku !== undefined) {
-    updateData.sku = updateData.sku
-      .trim()
-      .toUpperCase();
+    updateData.sku = updateData.sku.trim().toUpperCase();
 
-    await checkDuplicateSku(
-      updateData.sku,
-      id
-    );
+    await checkDuplicateSku(updateData.sku, id);
   }
 
   // Chuẩn hóa các thuộc tính được cập nhật.
@@ -371,16 +334,9 @@ const update = async (id, data) => {
     material: updateData.material ?? variant.material,
   };
 
-  await checkDuplicateCombination(
-    variant.productId,
-    mergedData,
-    id
-  );
+  await checkDuplicateCombination(variant.productId, mergedData, id);
 
-  return variantRepository.update(
-    id,
-    updateData
-  );
+  return variantRepository.update(id, updateData);
 };
 
 /**

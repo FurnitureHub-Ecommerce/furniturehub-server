@@ -357,6 +357,14 @@ const definition = {
         type: "object",
         required: ["name", "categoryId", "brandId"],
         properties: {
+          availableStock: {
+            type: "integer",
+            minimum: 0,
+            nullable: true,
+            readOnly: true,
+            example: 12,
+            description: "GET danh sách/chi tiết: tổng tồn kho các biến thể đang hoạt động. Không có biến thể: 0; tồn kho thiếu hoặc không hợp lệ: null.",
+          },
           name: {
             type: "string",
             example: "Sofa Milano",
@@ -386,6 +394,14 @@ const definition = {
         type: "object",
         required: ["sku", "price"],
         properties: {
+          availableStock: {
+            type: "integer",
+            minimum: 0,
+            nullable: true,
+            readOnly: true,
+            example: 5,
+            description: "GET danh sách/chi tiết: Inventory.quantity của biến thể; 0 là hết hàng, null là tồn kho chưa xác định.",
+          },
           sku: {
             type: "string",
             example: "SOFA-MILANO-BEIGE-L",
