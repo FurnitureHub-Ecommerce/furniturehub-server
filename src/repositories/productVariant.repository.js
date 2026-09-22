@@ -36,6 +36,12 @@ const findByProductId = (productId, filter = {}) => {
   }).sort({ createdAt: -1 });
 };
 
+const findByProductIds = (productIds, filter = {}) => {
+  return ProductVariant.find({ productId: { $in: productIds }, ...filter })
+    .select("_id productId")
+    .lean();
+};
+
 /**
  * Bước 3: Tìm Variant theo ID.
  *
@@ -93,6 +99,7 @@ const update = (id, data) => {
 // Bước 7: Export các hàm.
 module.exports = {
   findByProductId,
+  findByProductIds,
   findById,
   findBySku,
   create,

@@ -23,6 +23,7 @@ const productRepository = require("../repositories/product.repository");
 const categoryRepository = require("../repositories/category.repository");
 
 const brandRepository = require("../repositories/brand.repository");
+const availabilityService = require("./availability.service");
 
 /**
  * Bước 2: Tạo lỗi nghiệp vụ.
@@ -119,7 +120,8 @@ const getById = async (id, isAdmin = false) => {
     throw makeError("Product not found", 404);
   }
 
-  return product;
+  const [productWithStock] = await availabilityService.withProductStock([product]);
+  return productWithStock;
 };
 
 /**
@@ -314,10 +316,11 @@ const getCatalog = async (query = {}) => {
 
   // Bước 10: Tính tổng số trang.
   const totalPages = Math.ceil(totalItems / limit);
+  const productsWithStock = await availabilityService.withProductStock(products);
 
   // Bước 11: Trả về kết quả cho Controller.
   return {
-    products,
+    products: productsWithStock,
 
     pagination: {
       page,
