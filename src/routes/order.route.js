@@ -1,6 +1,6 @@
 /**
  * @Author: Minh Truong
- * Mục đích: đăng ký API tạo, xem và yêu cầu cập nhật trạng thái Order.
+ * Mục đích: đăng ký API tạo, xem và kiểm soát trạng thái Order.
  * Bước 1: Xác thực JWT bằng middleware hiện tại (401).
  * Bước 2: POST/GET giữ quyền CUSTOMER; PATCH trạng thái chỉ STAFF/ADMIN (403).
  * Bước 3: PATCH kiểm tra ID trước body bằng Zod (400), rồi gọi Controller.
@@ -29,6 +29,24 @@ router.patch(
   validateOrderId,
   validate(updateOrderStatusSchema),
   orderController.updateOrderStatus
+);
+
+// Confirm Order: chỉ STAFF và ADMIN. Không cần body; chỉ cần Order ID hợp lệ.
+// Tái sử dụng validateOrderId middleware của Task 1 để kiểm tra định dạng ObjectId.
+router.patch(
+  "/:id/confirm",
+  authorizeRoles(ROLES.STAFF, ROLES.ADMIN),
+  validateOrderId,
+  orderController.confirmOrder
+);
+
+// Reject Order: chỉ STAFF và ADMIN. Không cần body; chỉ cần Order ID hợp lệ.
+// Tái sử dụng validateOrderId middleware của Task 1 để kiểm tra định dạng ObjectId.
+router.patch(
+  "/:id/reject",
+  authorizeRoles(ROLES.STAFF, ROLES.ADMIN),
+  validateOrderId,
+  orderController.rejectOrder
 );
 
 // Giữ nguyên phân quyền các API Customer và Router Payment được gắn sau Router này.

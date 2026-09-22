@@ -47,9 +47,8 @@ const getOrderById = async (req, res) => {
 
 /**
  * Chuyển ID và status đã validate tới Service sau khi Route kiểm tra STAFF/ADMIN.
- * Service hiện chặn mọi chuyển trạng thái bằng 409 vì nghiệp vụ chưa sẵn sàng.
- * Hợp đồng 200 với { message, order } chỉ dùng khi Service hoàn thành toàn bộ
- * nghiệp vụ ở task sau; Controller không tự ghi status hoặc giả lập thành công.
+ * Sau Task 2: confirmed/rejected được delegate sang confirmOrder/rejectOrder Service.
+ * cancelled vẫn bị chặn cho đến Task 3. Controller không tự ghi status.
  */
 const updateOrderStatus = async (req, res) => {
   try {
@@ -60,4 +59,42 @@ const updateOrderStatus = async (req, res) => {
   }
 };
 
-module.exports = { createOrder, getOrderById, updateOrderStatus };
+/**
+ * Mục đích: xác nhận đơn hàng (pending → confirmed) bởi STAFF hoặc ADMIN.
+ * Nhận id từ URL đã qua validateOrderId; không cần body.
+ * Gọi Service thực hiện đầy đủ nghiệp vụ: kiểm tra tồn kho, trừ kho, cập nhật status.
+ * Thành công trả 200 với { message, data }; mọi lỗi đi qua handleError.
+ * Không tự trừ kho hoặc ghi Order trong Controller.
+ */
+const confirmOrder = async (req, res) => {
+  try {
+    const order = await orderService.confirmOrder(req.params.id);
+    return res.status(200).json({
+      message: "Order confirmed successfully",
+      data: order,
+    });
+  } catch (error) {
+    return handleError(res, error);
+  }
+};
+
+/**
+ * Mục đích: từ chối đơn hàng (pending → rejected) bởi STAFF hoặc ADMIN.
+ * Nhận id từ URL đã qua validateOrderId; không cần body.
+ * Gọi Service kiểm tra quy tắc trạng thái và cập nhật Order an toàn.
+ * Pending chưa trừ kho nên reject không cần hoàn kho.
+ * Thành công trả 200 với { message, data }; mọi lỗi đi qua handleError.
+ */
+const rejectOrder = async (req, res) => {
+  try {
+    const order = await orderService.rejectOrder(req.params.id);
+    return res.status(200).json({
+      message: "Order rejected successfully",
+      data: order,
+    });
+  } catch (error) {
+    return handleError(res, error);
+  }
+};
+
+module.exports = { createOrder, getOrderById, updateOrderStatus, confirmOrder, rejectOrder };

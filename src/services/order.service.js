@@ -8,6 +8,7 @@ const Order = require("../models/Order.model");
 const addressService = require("./address.service");
 const cartRepository = require("../repositories/cart.repository");
 const checkoutService = require("./checkout.service");
+const inventoryRepository = require("../repositories/inventory.repository");
 const { orderIdSchema } = require("../validators/order.validator");
 const { ORDER_STATUSES, ORDER_STATUS_TRANSITIONS } = require("../constants/orderStatus");
 
@@ -127,18 +128,173 @@ const assertOrderStatusTransition = (currentStatus, nextStatus) => {
 };
 
 /**
+ * @Author: Minh Truong
+ *
+ * Mục đích:
+ * Xử lý nghiệp vụ xác nhận đơn hàng (pending → confirmed) bởi STAFF hoặc ADMIN.
+ *
+ * Bước 1: Validate OrderId bằng Zod, sai định dạng trả 400 trước mọi truy vấn.
+ * Bước 2: Tìm Order theo _id; nhân viên không bị giới hạn bởi chủ đơn.
+ *         Order không tồn tại trả 404.
+ * Bước 3: Kiểm tra quy tắc chuyển trạng thái qua assertOrderStatusTransition.
+ *         Chỉ cho phép pending → confirmed. Mọi trường hợp khác trả 409.
+ *         Tái sử dụng hàm dùng chung của Task 1, không viết lại logic quy tắc.
+ * Bước 4: Gộp quantity các OrderItem theo variantId để kiểm tra tồn kho.
+ *         Mỗi variant chỉ cần một bản ghi Inventory; gộp đúng trường hợp cùng variant.
+ *         Đơn hàng pending chưa bao giờ trừ kho; confirm là thời điểm trừ kho duy nhất.
+ * Bước 5: Gọi deductStockForOrder để kiểm tra và trừ kho atomic.
+ *         Thiếu Inventory hoặc không đủ hàng trả 409, không cập nhật Order.
+ *         Race condition được xử lý bởi điều kiện $gte trong bulkWrite.
+ * Bước 6: Cập nhật Order bằng findOneAndUpdate với điều kiện { status: 'pending' }.
+ *         Điều kiện này ngăn hai request đồng thời đều ghi thành công:
+ *         - Nếu một request đã confirm, request kia không còn thấy status pending → trả null.
+ *         - Trả null nghĩa là race condition, ném lỗi 409.
+ *         new: true để trả document sau khi cập nhật.
+ * Bước 7: Trả 200 với message và dữ liệu Order đã confirmed.
+ *
+ * QUAN TRỌNG VỀ NHẤT QUÁN DỮ LIỆU:
+ * Nếu deductStock thành công nhưng findOneAndUpdate thất bại (race condition),
+ * kho đã bị trừ nhưng Order vẫn pending. Đây là trường hợp tồn tại do không có
+ * multi-document transaction trên môi trường standalone. Caller nhận 409 và có thể retry.
+ * Không tự động rollback kho vì không có cơ chế an toàn không có transaction.
+ * Tình huống này hiếm gặp: hai request confirm cùng lúc cho cùng một Order;
+ * STAFF/ADMIN cần kiểm tra lại tồn kho nếu thấy 409 sau khi đã trừ một phần.
+ */
+const confirmOrder = async (orderId) => {
+  // Bước 1: Validate ID.
+  if (!orderIdSchema.safeParse(orderId).success) {
+    const error = new Error("Invalid order ID");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  // Bước 2: Tìm Order theo ID, không lọc theo userId vì STAFF/ADMIN quản lý mọi đơn.
+  const order = await Order.findById(orderId).select("_id status items").lean();
+  if (!order) {
+    const error = new Error("Order not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  // Bước 3: Kiểm tra quy tắc chuyển trạng thái bằng hàm dùng chung của Task 1.
+  // Chỉ cho phép pending → confirmed; mọi trường hợp khác ném lỗi 409.
+  assertOrderStatusTransition(order.status, "confirmed");
+
+  // Bước 4: Gộp quantity theo variantId để kiểm tra và trừ đúng tổng số lượng.
+  // Cùng variant xuất hiện nhiều dòng trong Order items → cộng dồn quantity.
+  const deductionMap = new Map();
+  for (const item of order.items) {
+    const key = item.variantId.toString();
+    deductionMap.set(key, (deductionMap.get(key) || 0) + item.quantity);
+  }
+  const deductions = Array.from(deductionMap.entries()).map(([variantId, quantity]) => ({
+    variantId,
+    quantity,
+  }));
+
+  // Bước 5: Kiểm tra và trừ kho atomic. Thiếu hàng ném lỗi 409.
+  // Hàm này đọc tồn kho, kiểm tra trước, rồi bulkWrite có điều kiện $gte.
+  await inventoryRepository.deductStockForOrder(deductions);
+
+  // Bước 6: Cập nhật trạng thái Order với điều kiện status = pending.
+  // Điều kiện này ngăn race condition với request reject hoặc confirm đồng thời.
+  // Nếu trả null: request khác đã thay đổi status → 409.
+  const updated = await Order.findOneAndUpdate(
+    { _id: orderId, status: "pending" },
+    { status: "confirmed" },
+    { new: true, runValidators: true, select: "_id status updatedAt" }
+  ).lean();
+
+  if (!updated) {
+    // Race condition: kho đã trừ nhưng Order không còn pending.
+    // Không tự rollback kho; caller nhận 409 và xử lý thủ công nếu cần.
+    const error = new Error(
+      "Order status has already been changed by another request"
+    );
+    error.statusCode = 409;
+    throw error;
+  }
+
+  return updated;
+};
+
+/**
+ * @Author: Minh Truong
+ *
+ * Mục đích:
+ * Xử lý nghiệp vụ từ chối đơn hàng (pending → rejected) bởi STAFF hoặc ADMIN.
+ *
+ * Bước 1: Validate OrderId bằng Zod, sai định dạng trả 400.
+ * Bước 2: Tìm Order theo _id; không lọc theo userId vì STAFF/ADMIN quản lý mọi đơn.
+ *         Order không tồn tại trả 404.
+ * Bước 3: Kiểm tra quy tắc chuyển trạng thái qua assertOrderStatusTransition.
+ *         Chỉ cho phép pending → rejected. Mọi trường hợp khác trả 409.
+ *         Không được từ chối đơn đã confirmed, rejected hoặc cancelled.
+ * Bước 4: KHÔNG CẦN hoàn kho vì Order pending chưa bao giờ trừ kho.
+ *         Tồn kho chỉ bị trừ khi confirm (bước 5 của confirmOrder).
+ *         Từ chối trước khi confirm → không có gì để hoàn lại.
+ * Bước 5: Cập nhật trạng thái bằng findOneAndUpdate với điều kiện { status: 'pending' }.
+ *         Điều kiện này ngăn race condition với request confirm đồng thời:
+ *         - Nếu một request confirm đã ghi trước → status không còn pending → trả null → 409.
+ *         - Nếu hai request reject đồng thời → chỉ một thành công, một trả null → 409.
+ * Bước 6: Trả 200 với message và dữ liệu Order đã rejected.
+ *
+ * Không xóa Order hoặc OrderItems. Không thêm rejectionReason vì schema không có trường này.
+ */
+const rejectOrder = async (orderId) => {
+  // Bước 1: Validate ID.
+  if (!orderIdSchema.safeParse(orderId).success) {
+    const error = new Error("Invalid order ID");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  // Bước 2: Tìm Order theo ID, không lọc theo userId vì STAFF/ADMIN quản lý mọi đơn.
+  const order = await Order.findById(orderId).select("_id status").lean();
+  if (!order) {
+    const error = new Error("Order not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  // Bước 3: Kiểm tra quy tắc chuyển trạng thái bằng hàm dùng chung của Task 1.
+  // Chỉ cho phép pending → rejected; mọi trường hợp khác ném lỗi 409.
+  assertOrderStatusTransition(order.status, "rejected");
+
+  // Bước 4: Không hoàn kho vì pending chưa trừ kho lần nào.
+  // Kho chỉ bị trừ khi STAFF/ADMIN xác nhận (confirmOrder).
+  // Nếu tương lai thêm nghiệp vụ giữ hàng ở bước tạo đơn, phải cập nhật logic này.
+
+  // Bước 5: Cập nhật trạng thái với điều kiện status = pending để xử lý concurrency.
+  // Nếu trả null: request confirm hoặc reject khác đã chạy trước → 409.
+  const updated = await Order.findOneAndUpdate(
+    { _id: orderId, status: "pending" },
+    { status: "rejected" },
+    { new: true, runValidators: true, select: "_id status updatedAt" }
+  ).lean();
+
+  if (!updated) {
+    const error = new Error(
+      "Order status has already been changed by another request"
+    );
+    error.statusCode = 409;
+    throw error;
+  }
+
+  return updated;
+};
+
+/**
  * Tiếp nhận yêu cầu cập nhật từ STAFF/ADMIN đã được Route phân quyền.
  * Bước 1: Kiểm tra ID và status trước truy vấn, kể cả khi gọi Service trực tiếp.
  * Bước 2: Tìm Order theo ID; nhân viên không bị giới hạn bởi chủ đơn. Thiếu trả 404.
  * Bước 3: Kiểm tra trạng thái lặp và bảng quy tắc qua hàm dùng chung.
- * Bước 4: Chặn bằng 409 vì chưa có Confirm/Reject (Task 2), Cancel (Task 3)
- * hoặc xử lý kho (Task 4). Đổi enum đơn thuần không hoàn thành các nghiệp vụ này.
+ * Bước 4: Delegate sang confirmOrder hoặc rejectOrder để thực hiện đầy đủ nghiệp vụ.
+ *         Chỉ cancel vẫn bị chặn vì chờ Task 3.
  *
- * Task 1 không có đường ghi: hai yêu cầu đồng thời đều bị chặn, không ghi đè nhau.
- * Khi bổ sung nghiệp vụ, phải cập nhật có điều kiện {_id: orderId, status: order.status}
- * bằng findOneAndUpdate với runValidators và trả 409 nếu không còn khớp.
- * Việc ghi Order và thay đổi kho phải cùng được bảo đảm nhất quán trong nghiệp vụ;
- * không thay lỗi bên dưới bằng một lệnh save chỉ đổi status hoặc cờ bỏ qua kiểm tra.
+ * Endpoint này không bỏ qua nghiệp vụ: Confirm đi qua confirmOrder (có trừ kho),
+ * Reject đi qua rejectOrder (có kiểm tra kho). Không có đường tắt nào.
+ * Khi bổ sung Cancel (Task 3), thêm nhánh tương tự.
  */
 const updateOrderStatus = async (orderId, status) => {
   if (!orderIdSchema.safeParse(orderId).success) {
@@ -152,6 +308,12 @@ const updateOrderStatus = async (orderId, status) => {
     throw error;
   }
 
+  // Delegate sang nghiệp vụ chuyên biệt thay vì chỉ kiểm tra quy tắc.
+  // Confirm và Reject đã có đầy đủ nghiệp vụ sau Task 2.
+  if (status === "confirmed") return confirmOrder(orderId);
+  if (status === "rejected") return rejectOrder(orderId);
+
+  // Cancel (Task 3) vẫn bị chặn vì chưa có nghiệp vụ hoàn kho và xử lý Payment.
   const order = await Order.findById(orderId).select("_id status").lean();
   if (!order) {
     const error = new Error("Order not found");
@@ -159,6 +321,7 @@ const updateOrderStatus = async (orderId, status) => {
     throw error;
   }
 
+  // Kiểm tra quy tắc trước khi báo chưa sẵn sàng, để trả 409 đúng lý do.
   assertOrderStatusTransition(order.status, status);
 
   const error = new Error(
@@ -168,4 +331,11 @@ const updateOrderStatus = async (orderId, status) => {
   throw error;
 };
 
-module.exports = { createOrder, getOrderById, assertOrderStatusTransition, updateOrderStatus };
+module.exports = {
+  createOrder,
+  getOrderById,
+  assertOrderStatusTransition,
+  confirmOrder,
+  rejectOrder,
+  updateOrderStatus,
+};
