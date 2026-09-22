@@ -49,6 +49,17 @@ router.patch(
   orderController.rejectOrder
 );
 
+// Cancel Order (Task 3): CUSTOMER, STAFF, ADMIN.
+// - CUSTOMER chỉ được hủy Order của chính mình (kiểm tra ở Service bằng req.user.userId).
+// - STORAGE_MANAGER (và STORAGE) không có quyền hủy đơn hàng (bị từ chối với 403 Forbidden).
+// - Không cần body; chỉ cần Order ID hợp lệ trên URL (validate qua validateOrderId).
+router.patch(
+  "/:id/cancel",
+  authorizeRoles(ROLES.CUSTOMER, ROLES.STAFF, ROLES.ADMIN),
+  validateOrderId,
+  orderController.cancelOrder
+);
+
 // Giữ nguyên phân quyền các API Customer và Router Payment được gắn sau Router này.
 router.use(authorizeRoles(ROLES.CUSTOMER));
 router.post("/", validate(createOrderSchema), orderController.createOrder);

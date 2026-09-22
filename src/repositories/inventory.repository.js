@@ -75,4 +75,21 @@ const deductStockForOrder = async (deductions) => {
   }
 };
 
-module.exports = { findByVariantIds, deductStockForOrder };
+/**
+ * Mục đích: hoàn lại số lượng tồn kho khi confirmOrder bị race condition (không update được Order).
+ * Đầu vào: mảng deductions = [{ variantId, quantity }]
+ */
+const restoreStockForOrder = async (deductions) => {
+  if (!deductions || deductions.length === 0) return;
+
+  const bulkOps = deductions.map((d) => ({
+    updateOne: {
+      filter: { variantId: d.variantId },
+      update: { $inc: { quantity: d.quantity } },
+    },
+  }));
+
+  await Inventory.bulkWrite(bulkOps, { ordered: false });
+};
+
+module.exports = { findByVariantIds, deductStockForOrder, restoreStockForOrder };

@@ -132,11 +132,11 @@ const definition = {
           order: { $ref: "#/components/schemas/Order" },
         },
       },
-      // Schema response cho Confirm và Reject Order (Task 2).
+      // Schema response cho Confirm, Reject và Cancel Order (Task 2 & Task 3).
       OrderConfirmRejectResult: {
         type: "object",
         required: ["message", "data"],
-        description: "Phản hồi thành công khi xác nhận hoặc từ chối đơn hàng. data chứa snapshot tối giản sau khi cập nhật.",
+        description: "Phản hồi thành công khi xác nhận, từ chối hoặc hủy đơn hàng. data chứa snapshot tối giản sau khi cập nhật.",
         properties: {
           message: { type: "string", example: "Order confirmed successfully" },
           data: {
@@ -144,7 +144,7 @@ const definition = {
             required: ["_id", "status"],
             properties: {
               _id: { type: "string", example: "507f1f77bcf86cd799439011" },
-              status: { type: "string", enum: ["confirmed", "rejected"], example: "confirmed" },
+              status: { type: "string", enum: ["confirmed", "rejected", "cancelled"], example: "confirmed" },
               updatedAt: { type: "string", format: "date-time" },
             },
           },
@@ -726,18 +726,18 @@ definition.paths = {
         "Chỉ STAFF và ADMIN được gọi; CUSTOMER và STORAGE_MANAGER bị từ chối với 403. " +
         "Body bắt buộc có duy nhất status dạng chuỗi thuộc enum. Order ID phải là ObjectId 24 ký tự hex. " +
         "Quy tắc: pending → confirmed/rejected/cancelled; cùng trạng thái hoặc mọi chuyển khác trả 409. " +
-        "Task 1 hiện chỉ hoàn thiện nền tảng: CẢ BA chuyển từ pending đều bị chặn với 409, không ghi dữ liệu. " +
-        "Confirm/Reject chờ Task 2, Cancel chờ Task 3; trừ/hoàn kho và các điều kiện kho liên quan chờ Task 4. " +
-        "Chỉ khi toàn bộ nghiệp vụ tương ứng hoàn thiện mới được mở chuyển trạng thái, không được chỉ đổi status để bỏ qua nghiệp vụ. " +
-        "Khi được mở, cập nhật phải kèm điều kiện trạng thái hiện tại để hai request không cùng ghi đè một đơn. " +
-        "200 là hợp đồng dành cho giai đoạn đó, hiện chưa có chuyển trạng thái thành công. " +
-        "Customer tiếp tục đọc status trong GET /api/orders/{id}; quyền hủy riêng của Customer thuộc Task 3.",
+        "Cả ba chuyển trạng thái đều được delegate sang Service chuyên biệt: " +
+        "- confirmed: delegate sang confirmOrder (kiểm tra và trừ kho atomic). " +
+        "- rejected: delegate sang rejectOrder (không hoàn kho do pending chưa trừ). " +
+        "- cancelled: delegate sang cancelOrder (kiểm tra quyền, kiểm tra thanh toán, không hoàn kho). " +
+        "Không có đường tắt nào cho phép bỏ qua nghiệp vụ hoặc ghi đè trạng thái. " +
+        "Cập nhật luôn kèm điều kiện trạng thái pending để hai request không cùng ghi đè một đơn.",
       security: [{ bearerAuth: [] }],
       parameters: [idParam()],
       requestBody: requestBody("UpdateOrderStatusInput"),
       responses: {
         200: checkoutResponse(
-          "Dự kiến khi nghiệp vụ chuyển trạng thái đã hoàn thiện; Task 1 hiện không có đường thành công",
+          "Cập nhật trạng thái đơn hàng thành công",
           "OrderStatusUpdated"
         ),
         400: checkoutResponse("Order ID sai định dạng; thiếu status, sai kiểu/enum hoặc có trường body không được phép", "CheckoutError", {
@@ -757,10 +757,10 @@ definition.paths = {
         404: checkoutResponse("Order không tồn tại", "CheckoutError", {
           missingOrder: { value: { message: "Order not found" } },
         }),
-        409: checkoutResponse("Cùng trạng thái, chuyển trái quy tắc hoặc nghiệp vụ tương ứng chưa sẵn sàng", "CheckoutError", {
+        409: checkoutResponse("Cùng trạng thái, chuyển trái quy tắc, thiếu hàng hoặc race condition", "CheckoutError", {
           unchanged: { value: { message: 'Order already has status "pending"' } },
           invalidTransition: { value: { message: 'Cannot change order status from "confirmed" to "pending"' } },
-          cancelNotReady: { value: { message: 'Order status transition to "cancelled" is not available until the corresponding order workflow is implemented' } },
+          insufficientStock: { value: { message: "Insufficient stock for variant(s): 507f1f77bcf86cd799439013" } },
           raceCondition: { value: { message: "Order status has already been changed by another request" } },
         }),
         500: checkoutResponse("Lỗi hệ thống; không trả stack trace hoặc chi tiết nội bộ", "CheckoutError", {
@@ -867,6 +867,74 @@ definition.paths = {
           notPending: { value: { message: 'Cannot change order status from "rejected" to "rejected"' } },
           alreadyConfirmed: { value: { message: 'Cannot change order status from "confirmed" to "rejected"' } },
           alreadyCancelled: { value: { message: 'Cannot change order status from "cancelled" to "rejected"' } },
+          raceCondition: { value: { message: "Order status has already been changed by another request" } },
+        }),
+        500: checkoutResponse("Lỗi hệ thống; không trả stack trace", "CheckoutError", {
+          serverError: { value: { message: "Internal server error" } },
+        }),
+      },
+    },
+  },
+  /**
+   * Mục đích: mô tả API hủy đơn hàng (Task 3).
+   * CUSTOMER chỉ được hủy đơn của chính mình; STAFF/ADMIN được hủy đơn hợp lệ; STORAGE_MANAGER bị từ chối với 403.
+   * Chỉ cho phép pending → cancelled. Pending chưa trừ kho nên không hoàn kho.
+   * Cập nhật Order có điều kiện status pending để ngăn race condition.
+   */
+  "/api/orders/{id}/cancel": {
+    patch: {
+      tags: ["Order"],
+      summary: "CUSTOMER hủy đơn của mình / STAFF, ADMIN hủy đơn hợp lệ (pending → cancelled)",
+      description:
+        "CUSTOMER (chỉ được hủy đơn do chính mình tạo), STAFF và ADMIN được gọi; " +
+        "STORAGE_MANAGER bị từ chối với 403 Forbidden. " +
+        "CUSTOMER hủy đơn của người khác bị từ chối với 403 Forbidden. " +
+        "Không cần body; chỉ cần Order ID hợp lệ trên URL. " +
+        "Chỉ cho phép chuyển trạng thái pending → cancelled. " +
+        "Đơn đã cancelled hoặc rejected: trả 409 Conflict. " +
+        "Đơn đã confirmed: trả 409 Conflict vì Task 4 (hoàn kho) và quy trình hoàn tiền chưa triển khai. " +
+        "Đơn pending chưa từng bị trừ kho khi tạo nên không hoàn kho (tránh tăng khống tồn kho). " +
+        "Nếu đơn có Payment đã thanh toán ('paid'), chặn hủy với 409 Conflict do chưa có Refund API. " +
+        "Nếu đơn có Payment đang 'pending', trạng thái Payment sẽ được đồng bộ cập nhật sang 'cancelled'. " +
+        "Không xóa Order hoặc OrderItems khỏi database. " +
+        "Cập nhật Order bằng findOneAndUpdate với điều kiện status=pending để xử lý concurrency: " +
+        "nếu hai request Cancel hoặc 1 Confirm + 1 Cancel chạy đồng thời, chỉ một request thành công; " +
+        "request còn lại trả 409 Conflict. " +
+        "Endpoint PATCH /status khi gửi status=cancelled cũng được delegate sang đây.",
+      security: [{ bearerAuth: [] }],
+      parameters: [idParam()],
+      responses: {
+        200: checkoutResponse("Đã hủy đơn hàng thành công", "OrderConfirmRejectResult", {
+          cancelled: {
+            value: {
+              message: "Order cancelled successfully",
+              data: {
+                _id: "507f1f77bcf86cd799439011",
+                status: "cancelled",
+                updatedAt: "2026-09-22T01:30:00.000Z",
+              },
+            },
+          },
+        }),
+        400: checkoutResponse("Order ID sai định dạng", "CheckoutError", {
+          invalidId: { value: { message: "Invalid order ID" } },
+        }),
+        401: checkoutResponse("Thiếu JWT hoặc JWT không hợp lệ/hết hạn", "CheckoutError", {
+          missingToken: { value: { message: "Access token is required" } },
+          invalidToken: { value: { message: "Invalid or expired token" } },
+        }),
+        403: checkoutResponse("Role không được phép hoặc Customer không sở hữu Order", "CheckoutError", {
+          notOwner: { value: { message: "You do not have permission to cancel this order" } },
+          forbiddenRole: { value: { message: "Forbidden: insufficient permission" } },
+        }),
+        404: checkoutResponse("Đơn không tồn tại", "CheckoutError", {
+          missingOrder: { value: { message: "Order not found" } },
+        }),
+        409: checkoutResponse("Đơn không ở trạng thái pending, đã thanh toán hoặc race condition", "CheckoutError", {
+          alreadyCancelled: { value: { message: 'Order already has status "cancelled"' } },
+          alreadyRejected: { value: { message: 'Cannot change order status from "rejected" to "cancelled"' } },
+          alreadyConfirmed: { value: { message: 'Cannot change order status from "confirmed" to "cancelled"' } },
+          paymentCompleted: { value: { message: "Cannot cancel order: payment has already been completed. Refund workflow is not implemented." } },
           raceCondition: { value: { message: "Order status has already been changed by another request" } },
         }),
         500: checkoutResponse("Lỗi hệ thống; không trả stack trace", "CheckoutError", {
