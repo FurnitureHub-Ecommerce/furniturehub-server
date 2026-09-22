@@ -13,6 +13,7 @@
  * Bước 7: Khai báo Product API.
  * Bước 8: Khai báo ProductVariant/SKU API.
  * Bước 8a: Khai báo kiểm tra checkout và các phản hồi cụ thể.
+ * Bước 8b: Mô tả nền tảng cập nhật trạng thái đơn và nghiệp vụ còn phụ thuộc.
  * Bước 9: Tạo Swagger Specification.
  * Bước 10: Export cấu hình để app.js sử dụng.
  *
@@ -22,6 +23,7 @@
 
 const swaggerJsdoc = require("swagger-jsdoc");
 const swaggerUi = require("swagger-ui-express");
+const { ORDER_STATUSES } = require("../constants/orderStatus");
 
 // Bước 2: Khai báo thông tin chung.
 const definition = {
@@ -61,6 +63,16 @@ const definition = {
           addressId: { type: "string", pattern: "^[0-9a-fA-F]{24}$", example: "507f1f77bcf86cd799439011" },
         },
       },
+      // Dùng cùng enum với Model và Validator để tài liệu không lệch quy tắc.
+      UpdateOrderStatusInput: {
+        type: "object", required: ["status"], additionalProperties: false,
+        description:
+          "Chỉ nhận status. Enum hợp lệ chưa đồng nghĩa được phép chuyển trạng thái; " +
+          "Service còn kiểm tra trạng thái hiện tại và nghiệp vụ tương ứng.",
+        properties: {
+          status: { type: "string", enum: ORDER_STATUSES, example: "confirmed" },
+        },
+      },
       OrderShippingAddress: {
         type: "object", required: ["receiverName", "phone", "addressLine", "ward", "city"],
         description: "Snapshot lúc đặt hàng, giữ nguyên khi Address bị sửa hoặc xóa",
@@ -89,7 +101,10 @@ const definition = {
         type: "object", required: ["_id", "userId", "status", "shippingAddress", "items", "subtotal", "totalAmount", "createdAt", "updatedAt"],
         properties: {
           _id: { type: "string" }, userId: { type: "string" },
-          status: { type: "string", enum: ["pending"] },
+          status: {
+            type: "string", enum: ORDER_STATUSES, default: "pending",
+            description: "Đơn mới luôn pending. Các trạng thái đích chỉ được áp dụng sau khi hoàn thiện nghiệp vụ tương ứng.",
+          },
           shippingAddress: { $ref: "#/components/schemas/OrderShippingAddress" },
           items: { type: "array", minItems: 1, items: { $ref: "#/components/schemas/OrderItem" } },
           subtotal: { type: "number", minimum: 0 },
@@ -108,6 +123,14 @@ const definition = {
       OrderDetail: {
         type: "object", required: ["order"],
         properties: { order: { $ref: "#/components/schemas/Order" } },
+      },
+      OrderStatusUpdated: {
+        type: "object", required: ["message", "order"],
+        description: "Hợp đồng thành công dành cho khi nghiệp vụ chuyển trạng thái đã sẵn sàng; Task 1 hiện chưa trả phản hồi này.",
+        properties: {
+          message: { type: "string", example: "Order status updated successfully" },
+          order: { $ref: "#/components/schemas/Order" },
+        },
       },
       // ===== PAYMENT SCHEMAS (Task 5) =====
       CreatePaymentInput: {
@@ -473,7 +496,7 @@ const definition = {
     { name: "Auth", description: "Xác thực người dùng" },
     { name: "Cart", description: "Quản lý giỏ hàng" },
     { name: "Checkout", description: "Kiểm tra điều kiện checkout" },
-    { name: "Order", description: "Tạo và xem chi tiết đơn hàng" },
+    { name: "Order", description: "Tạo, xem chi tiết và kiểm soát trạng thái đơn hàng" },
     { name: "Payment", description: "Quản lý thanh toán đơn hàng" },
     { name: "Category", description: "Quản lý danh mục" },
     { name: "Brand", description: "Quản lý thương hiệu" },
@@ -611,7 +634,7 @@ const checkoutResponse = (description, schemaName, examples) => ({
 });
 
 definition.paths = {
-  // Order chỉ dành cho Customer và lưu toàn bộ snapshot trong một document.
+  // Tạo Order dành cho Customer và lưu toàn bộ snapshot trong một document.
   "/api/orders": {
     post: {
       tags: ["Order"],
@@ -665,6 +688,64 @@ definition.paths = {
           missingOrder: { value: { message: "Order not found" } },
         }),
         500: checkoutResponse("Lỗi hệ thống, không trả chi tiết nội bộ", "CheckoutError", {
+          serverError: { value: { message: "Internal server error" } },
+        }),
+      },
+    },
+  },
+  /**
+   * Mục đích: mô tả API trạng thái dành riêng cho STAFF/ADMIN.
+   * Quy tắc chỉ cho pending sang confirmed, rejected hoặc cancelled; không cho lặp/lùi.
+   * Task 1 chặn toàn bộ chuyển trạng thái hợp lệ vì chưa có nghiệp vụ Task 2–4.
+   * Phản hồi 200 chỉ là hợp đồng cho giai đoạn sau, không mô tả là đã hoạt động.
+   */
+  "/api/orders/{id}/status": {
+    patch: {
+      tags: ["Order"],
+      summary: "STAFF/ADMIN yêu cầu cập nhật trạng thái Order",
+      description:
+        "Chỉ STAFF và ADMIN được gọi; CUSTOMER và STORAGE_MANAGER bị từ chối với 403. " +
+        "Body bắt buộc có duy nhất status dạng chuỗi thuộc enum. Order ID phải là ObjectId 24 ký tự hex. " +
+        "Quy tắc: pending → confirmed/rejected/cancelled; cùng trạng thái hoặc mọi chuyển khác trả 409. " +
+        "Task 1 hiện chỉ hoàn thiện nền tảng: CẢ BA chuyển từ pending đều bị chặn với 409, không ghi dữ liệu. " +
+        "Confirm/Reject chờ Task 2, Cancel chờ Task 3; trừ/hoàn kho và các điều kiện kho liên quan chờ Task 4. " +
+        "Chỉ khi toàn bộ nghiệp vụ tương ứng hoàn thiện mới được mở chuyển trạng thái, không được chỉ đổi status để bỏ qua nghiệp vụ. " +
+        "Khi được mở, cập nhật phải kèm điều kiện trạng thái hiện tại để hai request không cùng ghi đè một đơn. " +
+        "200 là hợp đồng dành cho giai đoạn đó, hiện chưa có chuyển trạng thái thành công. " +
+        "Customer tiếp tục đọc status trong GET /api/orders/{id}; quyền hủy riêng của Customer thuộc Task 3.",
+      security: [{ bearerAuth: [] }],
+      parameters: [idParam()],
+      requestBody: requestBody("UpdateOrderStatusInput"),
+      responses: {
+        200: checkoutResponse(
+          "Dự kiến khi nghiệp vụ chuyển trạng thái đã hoàn thiện; Task 1 hiện không có đường thành công",
+          "OrderStatusUpdated"
+        ),
+        400: checkoutResponse("Order ID sai định dạng; thiếu status, sai kiểu/enum hoặc có trường body không được phép", "CheckoutError", {
+          invalidId: { value: { message: "Invalid order ID" } },
+          unexpectedField: { value: {
+            message: "Validation failed",
+            errors: [{ code: "unrecognized_keys", keys: ["totalAmount"], path: [], message: 'Unrecognized key: "totalAmount"' }],
+          } },
+        }),
+        401: checkoutResponse("Thiếu JWT hoặc JWT không hợp lệ/hết hạn", "CheckoutError", {
+          missingToken: { value: { message: "Access token is required" } },
+          invalidToken: { value: { message: "Invalid or expired token" } },
+        }),
+        403: checkoutResponse("Role không phải STAFF hoặc ADMIN, bao gồm CUSTOMER và STORAGE_MANAGER", "CheckoutError", {
+          forbidden: { value: { message: "Forbidden: insufficient permission" } },
+        }),
+        404: checkoutResponse("Order không tồn tại", "CheckoutError", {
+          missingOrder: { value: { message: "Order not found" } },
+        }),
+        409: checkoutResponse("Cùng trạng thái, chuyển trái quy tắc hoặc nghiệp vụ tương ứng chưa sẵn sàng", "CheckoutError", {
+          unchanged: { value: { message: 'Order already has status "pending"' } },
+          invalidTransition: { value: { message: 'Cannot change order status from "confirmed" to "pending"' } },
+          confirmNotReady: { value: { message: 'Order status transition to "confirmed" is not available until the corresponding order workflow is implemented' } },
+          rejectNotReady: { value: { message: 'Order status transition to "rejected" is not available until the corresponding order workflow is implemented' } },
+          cancelNotReady: { value: { message: 'Order status transition to "cancelled" is not available until the corresponding order workflow is implemented' } },
+        }),
+        500: checkoutResponse("Lỗi hệ thống; không trả stack trace hoặc chi tiết nội bộ", "CheckoutError", {
           serverError: { value: { message: "Internal server error" } },
         }),
       },
