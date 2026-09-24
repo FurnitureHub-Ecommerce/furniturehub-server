@@ -2,9 +2,10 @@
  * @Author: Minh Truong
  * Mục đích: đăng ký API tạo, xem và kiểm soát trạng thái Order.
  * Bước 1: Xác thực JWT bằng middleware hiện tại (401).
- * Bước 2: POST/GET giữ quyền CUSTOMER; PATCH trạng thái chỉ STAFF/ADMIN (403).
+ * Bước 2: POST/GET giữ quyền CUSTOMER; PATCH status/confirm/reject chỉ STAFF/ADMIN (403).
+ * CUSTOMER được hủy đơn của mình qua PATCH cancel theo quyền sẵn có.
  * Bước 3: PATCH kiểm tra ID trước body bằng Zod (400), rồi gọi Controller.
- * Bước 4: Service kiểm tra tồn tại (404), quy tắc và nghiệp vụ phụ thuộc (409).
+ * Bước 4: Service kiểm tra tồn tại (404), thiếu hàng (400), quy tắc (409), transaction (503).
  */
 const express = require("express");
 const orderController = require("../controllers/order.controller");
@@ -31,7 +32,7 @@ router.patch(
   orderController.updateOrderStatus
 );
 
-// Confirm Order: chỉ STAFF và ADMIN. Không cần body; chỉ cần Order ID hợp lệ.
+// Xác nhận đơn: chỉ STAFF và ADMIN. Không cần body; chỉ cần Order ID hợp lệ.
 // Tái sử dụng validateOrderId middleware của Task 1 để kiểm tra định dạng ObjectId.
 router.patch(
   "/:id/confirm",
@@ -40,7 +41,7 @@ router.patch(
   orderController.confirmOrder
 );
 
-// Reject Order: chỉ STAFF và ADMIN. Không cần body; chỉ cần Order ID hợp lệ.
+// Từ chối đơn pending/confirmed: chỉ STAFF và ADMIN; Service tự hoàn kho nếu đã trừ.
 // Tái sử dụng validateOrderId middleware của Task 1 để kiểm tra định dạng ObjectId.
 router.patch(
   "/:id/reject",
@@ -49,7 +50,7 @@ router.patch(
   orderController.rejectOrder
 );
 
-// Cancel Order (Task 3): CUSTOMER, STAFF, ADMIN.
+// Hủy đơn theo quyền hiện có: CUSTOMER, STAFF, ADMIN.
 // - CUSTOMER chỉ được hủy Order của chính mình (kiểm tra ở Service bằng req.user.userId).
 // - STORAGE_MANAGER (và STORAGE) không có quyền hủy đơn hàng (bị từ chối với 403 Forbidden).
 // - Không cần body; chỉ cần Order ID hợp lệ trên URL (validate qua validateOrderId).

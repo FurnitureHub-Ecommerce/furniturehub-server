@@ -4,8 +4,9 @@
  * Mục đích: dùng chung trạng thái và quy tắc chuyển cho Model, Validator,
  * Service và Swagger, tránh mỗi nơi định nghĩa một danh sách khác nhau.
  *
- * Chỉ pending được chuyển sang confirmed, rejected hoặc cancelled.
- * Ba trạng thái đích là trạng thái kết thúc trong phạm vi hiện tại.
+ * Pending được chuyển sang confirmed, rejected hoặc cancelled.
+ * Confirmed được chuyển sang rejected/cancelled và phải hoàn kho đã trừ.
+ * Rejected và cancelled là trạng thái kết thúc, không được chuyển tiếp.
  * Quy tắc hợp lệ không có nghĩa là được ghi ngay: Service còn phải kiểm tra
  * nghiệp vụ xác nhận/từ chối/hủy và xử lý kho trước khi cho phép chuyển.
  * Đóng băng cả các mảng con để mã khác không vô tình mở thêm đường chuyển.
@@ -19,7 +20,7 @@ const ORDER_STATUSES = Object.freeze([
 
 const ORDER_STATUS_TRANSITIONS = Object.freeze({
   pending: Object.freeze(["confirmed", "rejected", "cancelled"]),
-  confirmed: Object.freeze([]),
+  confirmed: Object.freeze(["rejected", "cancelled"]),
   rejected: Object.freeze([]),
   cancelled: Object.freeze([]),
 });

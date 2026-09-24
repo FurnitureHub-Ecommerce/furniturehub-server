@@ -42,6 +42,7 @@ const orderPaymentRoute = require("./routes/orderPayment.route");
 
 // Payment: STAFF/ADMIN xác nhận trạng thái Payment.
 const paymentRoute = require("./routes/payment.route");
+const inventoryRoute = require("./routes/inventory.route");
 
 // Import hai Router quản lý ProductVariant.
 // File productVariant.route.js đang export hai Router riêng.
@@ -147,13 +148,14 @@ app.use("/api/orders/:orderId/payment", orderPaymentRoute);
 
 // Payment: STAFF/ADMIN xác nhận hoặc hủy trạng thái Payment.
 app.use("/api/payments", paymentRoute);
+app.use("/api/inventory", inventoryRoute);
 
 /**
- * Lỗi JSON xảy ra trước Router; chặn riêng cho Order để trả 400 dạng JSON.
+ * Lỗi JSON xảy ra trước Router; trả 400 dạng JSON cho Order và Inventory.
  * Không để Express trả trang lỗi chứa stack khi body bị hỏng hoặc là null.
  * Các lỗi khác tiếp tục đi theo cơ chế xử lý hiện tại của ứng dụng.
  */
-app.use("/api/orders", (error, req, res, next) => {
+app.use(["/api/orders", "/api/inventory"], (error, req, res, next) => {
   if (error.type === "entity.parse.failed") {
     return res.status(400).json({ message: "Invalid JSON body" });
   }

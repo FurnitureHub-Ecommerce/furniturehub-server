@@ -24,6 +24,27 @@
 const swaggerJsdoc = require("swagger-jsdoc");
 const swaggerUi = require("swagger-ui-express");
 const { ORDER_STATUSES } = require("../constants/orderStatus");
+const { STOCK_TRANSACTION_TYPES } = require("../constants/stockTransactionTypes");
+
+// Schema và tham số dùng chung cho Inventory.
+const ref = (name) => ({ $ref: `#/components/schemas/${name}` });
+const quantity = { type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER };
+const id = { type: "string", pattern: "^[0-9a-fA-F]{24}$" };
+const note = {
+  type: "string", maxLength: 500,
+  description: "Ghi chú tùy chọn; bỏ khoảng trắng đầu/cuối rồi giới hạn 500 ký tự.",
+  example: "Nhập hàng đợt tháng 9",
+};
+const variantParam = { name: "variantId", in: "path", required: true, schema: id };
+const pageParams = [
+  { name: "page", in: "query", schema: { type: "integer", minimum: 1, maximum: 1000000, default: 1 } },
+  { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 100, default: 20 } },
+];
+const listParams = [
+  ...pageParams,
+  { name: "variantId", in: "query", schema: id },
+  { name: "sku", in: "query", description: "SKU chính xác, tự trim và chuyển chữ hoa", schema: { type: "string", minLength: 1, maxLength: 200 } },
+];
 
 // Bước 2: Khai báo thông tin chung.
 const definition = {
@@ -57,6 +78,85 @@ const definition = {
 
     // Bước 4: Schema dùng chung.
     schemas: {
+      InventoryVariant: {
+        type: "object", nullable: true,
+        properties: {
+          _id: id,
+          sku: { type: "string", example: "SOFA-MILANO-BEIGE-L" },
+          color: { type: "string" }, size: { type: "string" }, material: { type: "string" },
+          isActive: { type: "boolean" },
+          productId: {
+            type: "object", nullable: true,
+            properties: { _id: id, name: { type: "string" }, isActive: { type: "boolean" } },
+          },
+        },
+      },
+      Inventory: {
+        type: "object", required: ["_id", "variantId", "quantity", "lowStockThreshold"],
+        description: "Một kho; mỗi variantId có tối đa một Inventory. SKU lấy từ ProductVariant, không lưu lại trong Inventory. GET populate variantId, thao tác ghi trả variantId dạng ID.",
+        properties: {
+          _id: id,
+          variantId: { oneOf: [id, ref("InventoryVariant")] },
+          quantity,
+          lowStockThreshold: { ...quantity, default: 3 },
+          createdAt: { type: "string", format: "date-time" },
+          updatedAt: { type: "string", format: "date-time" },
+        },
+      },
+      InventoryPagination: {
+        type: "object", required: ["page", "limit", "totalItems", "totalPages"],
+        properties: {
+          page: { type: "integer" }, limit: { type: "integer" },
+          totalItems: { type: "integer" }, totalPages: { type: "integer" },
+        },
+      },
+      InventoryList: {
+        type: "object", required: ["inventories", "pagination"],
+        properties: {
+          inventories: { type: "array", items: ref("Inventory") },
+          pagination: ref("InventoryPagination"),
+        },
+      },
+      InventoryDetail: {
+        type: "object", required: ["inventory"], properties: { inventory: ref("Inventory") },
+      },
+      StockMovementInput: {
+        type: "object", required: ["quantity"], additionalProperties: false,
+        properties: { quantity: { ...quantity, minimum: 1, example: 10 }, note },
+      },
+      StockAdjustmentInput: {
+        type: "object", required: ["quantity"], additionalProperties: false,
+        description: "quantity là số lượng thực tế mới, không phải phần cộng/trừ.",
+        properties: { quantity: { ...quantity, example: 9 }, note },
+      },
+      StockThresholdInput: {
+        type: "object", required: ["lowStockThreshold"], additionalProperties: false,
+        properties: { lowStockThreshold: { ...quantity, example: 3 } },
+      },
+      StockChangeResult: {
+        type: "object", required: ["message", "inventory", "transaction"],
+        properties: {
+          message: { type: "string" }, inventory: ref("Inventory"), transaction: ref("StockTransaction"),
+        },
+      },
+      StockThresholdResult: {
+        type: "object", required: ["message", "inventory"],
+        properties: { message: { type: "string" }, inventory: ref("Inventory") },
+      },
+      StockTransactionList: {
+        type: "object", required: ["transactions", "pagination"],
+        properties: {
+          transactions: { type: "array", items: ref("StockTransaction") },
+          pagination: ref("InventoryPagination"),
+        },
+      },
+      InventoryError: {
+        type: "object", required: ["message"],
+        properties: {
+          message: { type: "string" },
+          errors: { type: "array", description: "Zod validation issues nếu có", items: { type: "object" } },
+        },
+      },
       CreateOrderInput: {
         type: "object", required: ["addressId"], additionalProperties: false,
         properties: {
@@ -103,7 +203,7 @@ const definition = {
           _id: { type: "string" }, userId: { type: "string" },
           status: {
             type: "string", enum: ORDER_STATUSES, default: "pending",
-            description: "Đơn mới luôn pending. Các trạng thái đích chỉ được áp dụng sau khi hoàn thiện nghiệp vụ tương ứng.",
+            description: "Đơn mới pending; confirmed trừ kho, rejected/cancelled hoàn kho nếu đơn đã confirmed.",
           },
           shippingAddress: { $ref: "#/components/schemas/OrderShippingAddress" },
           items: { type: "array", minItems: 1, items: { $ref: "#/components/schemas/OrderItem" } },
@@ -126,10 +226,17 @@ const definition = {
       },
       OrderStatusUpdated: {
         type: "object", required: ["message", "order"],
-        description: "Hợp đồng thành công dành cho khi nghiệp vụ chuyển trạng thái đã sẵn sàng; Task 1 hiện chưa trả phản hồi này.",
+        description: "Kết quả PATCH /status: thông tin trạng thái tối giản sau khi nghiệp vụ kho hoàn tất.",
         properties: {
           message: { type: "string", example: "Order status updated successfully" },
-          order: { $ref: "#/components/schemas/Order" },
+          order: {
+            type: "object", required: ["_id", "status", "updatedAt"],
+            properties: {
+              _id: { type: "string" },
+              status: { type: "string", enum: ["confirmed", "rejected", "cancelled"] },
+              updatedAt: { type: "string", format: "date-time" },
+            },
+          },
         },
       },
       // Schema response cho Confirm, Reject và Cancel Order (Task 2 & Task 3).
@@ -148,6 +255,29 @@ const definition = {
               updatedAt: { type: "string", format: "date-time" },
             },
           },
+        },
+      },
+      // Lịch sử dùng chung cho nhập/xuất/kiểm kê thủ công và trừ/hoàn theo đơn hàng.
+      StockTransaction: {
+        type: "object",
+        required: ["_id", "inventoryId", "variantId", "type", "quantity", "beforeQuantity", "afterQuantity", "createdAt"],
+        description: "Lịch sử kho thủ công và đơn hàng. quantity là độ lớn thay đổi; ADJUSTMENT có thể bằng 0. orderId chỉ có với DEDUCTION/RESTORE.",
+        properties: {
+          _id: { type: "string", example: "6650a1b2c3d4e5f607a8b901" },
+          inventoryId: { type: "string", example: "6650a1b2c3d4e5f607a8b902" },
+          variantId: { oneOf: [{ type: "string" }, { $ref: "#/components/schemas/InventoryVariant" }] },
+          orderId: { type: "string", example: "6650a1b2c3d4e5f607a8b904" },
+          type: { type: "string", enum: STOCK_TRANSACTION_TYPES, example: "IMPORT" },
+          quantity: { type: "integer", minimum: 0, example: 2 },
+          beforeQuantity: { type: "integer", minimum: 0, example: 20 },
+          afterQuantity: { type: "integer", minimum: 0, example: 22 },
+          createdBy: { description: "Người thao tác lấy từ JWT; bắt buộc với IMPORT/EXPORT/ADJUSTMENT, không nhận từ body.", oneOf: [
+            { type: "string", nullable: true },
+            { type: "object", properties: { _id: { type: "string" }, fullName: { type: "string" } } },
+          ] },
+          note: { type: "string", maxLength: 500 },
+          createdAt: { type: "string", format: "date-time" },
+          updatedAt: { type: "string", format: "date-time" },
         },
       },
 
@@ -522,6 +652,7 @@ const definition = {
     { name: "Product", description: "Quản lý sản phẩm" },
     { name: "Variant", description: "Quản lý biến thể và SKU" },
     { name: "Wishlist", description: "Quản lý danh sách yêu thích" },
+    { name: "Inventory", description: "Quản lý tồn kho một cửa hàng — STORAGE_MANAGER thao tác, ADMIN chỉ xem" },
   ],
 };
 
@@ -632,7 +763,7 @@ const api = ({
  * Bước 5-8: Khai báo toàn bộ API đã triển khai.
  *
  * Các endpoint được chia thành từng nhóm.
- * API quản lý dữ liệu yêu cầu Bearer Token ADMIN.
+ * API quản lý dữ liệu yêu cầu Bearer Token với role tương ứng.
  * API đọc công khai không yêu cầu đăng nhập.
  */
 /**
@@ -652,7 +783,227 @@ const checkoutResponse = (description, schemaName, examples) => ({
   },
 });
 
+// Khai báo response và nghiệp vụ quản lý kho trong cùng tài liệu Swagger.
+const response = (description, schema, examples) => ({
+  description, content: { "application/json": { schema: ref(schema), ...(examples && { examples }) } },
+});
+const operation = (summary, description, resultSchema, parameters = [], bodySchema = null, storageManagerOnly = false) => ({
+  tags: ["Inventory"],
+  summary,
+  description: (storageManagerOnly
+    ? "Chỉ STORAGE_MANAGER được thao tác. ADMIN chỉ có quyền xem kho và bị từ chối với 403. "
+    : "STORAGE_MANAGER và ADMIN được xem. ") + description,
+  security: [{ bearerAuth: [] }],
+  parameters,
+  ...(bodySchema && { requestBody: { required: true, content: { "application/json": { schema: ref(bodySchema) } } } }),
+  responses: {
+    200: response("Thành công", resultSchema),
+    400: response("ID/query/body không hợp lệ hoặc xuất vượt tồn kho", "InventoryError"),
+    401: response("Thiếu JWT hoặc JWT không hợp lệ", "InventoryError"),
+    403: response(storageManagerOnly
+      ? "Chỉ STORAGE_MANAGER được thao tác; ADMIN, CUSTOMER và STAFF bị từ chối"
+      : "Không đủ quyền; CUSTOMER và STAFF bị từ chối", "InventoryError"),
+    404: response("Variant hoặc Inventory không tồn tại", "InventoryError"),
+    409: response("Xung đột tồn kho hoặc index; kiểm tra và thử lại", "InventoryError"),
+    500: response("Lỗi hệ thống", "InventoryError"),
+  },
+});
+// Ví dụ trước/sau và lỗi đi cùng từng thao tác để người dùng thử đúng nghiệp vụ trên Swagger.
+const mutation = (summary, description, schema, example) => {
+  const { type, beforeQuantity, afterQuantity, input, message } = example;
+  const minimum = type === "ADJUSTMENT" ? 0 : 1;
+  const result = operation(summary,
+    description + " Inventory và StockTransaction commit cùng một MongoDB transaction; cần replica set hoặc Atlas. " +
+    "createdBy lấy từ JWT, không nhận userId/type/beforeQuantity/afterQuantity/orderId từ body. " +
+    "SKU lấy từ ProductVariant; không lưu trùng trong Inventory. Note là chuỗi tùy chọn, trim và tối đa 500 ký tự. " +
+    "StockTransaction.quantity là độ lớn thay đổi; ADJUSTMENT không đổi tồn kho ghi quantity=0. " +
+    "Mỗi yêu cầu thành công là một thao tác mới và tạo một bản ghi lịch sử.",
+    "StockChangeResult", [variantParam], schema, true);
+  result.requestBody.content["application/json"].example = input;
+  const inventoryId = "507f1f77bcf86cd799439011";
+  const variantId = "507f1f77bcf86cd799439012";
+  const createdAt = "2026-09-24T03:00:00.000Z";
+  result.responses[200] = response("Thành công; tồn kho và một bản ghi lịch sử đã được lưu", "StockChangeResult", {
+    success: { value: {
+      message,
+      inventory: {
+        _id: inventoryId, variantId, quantity: afterQuantity, lowStockThreshold: 3,
+        createdAt, updatedAt: createdAt,
+      },
+      transaction: {
+        _id: "507f1f77bcf86cd799439013", inventoryId, variantId, type,
+        quantity: Math.abs(afterQuantity - beforeQuantity), beforeQuantity, afterQuantity,
+        createdBy: "507f1f77bcf86cd799439014", note: input.note, createdAt, updatedAt: createdAt,
+      },
+    } },
+  });
+  result.responses[400] = response("ID/body/số lượng không hợp lệ hoặc số lượng kết quả vượt giới hạn an toàn" +
+    (type === "EXPORT" ? "; xuất vượt tồn kho cũng trả 400" : ""), "InventoryError", {
+    invalidId: { value: { message: "Invalid variant ID" } },
+    invalidBody: { value: { message: "Invalid JSON body" } },
+    invalidQuantity: { summary: type === "ADJUSTMENT" ? "quantity âm" : "quantity bằng 0 hoặc âm", value: {
+      message: "Validation failed",
+      errors: [{ origin: "number", code: "too_small", minimum, inclusive: true,
+        path: ["quantity"], message: `Too small: expected number to be >=${minimum}` }],
+    } },
+    ...(type === "EXPORT" && {
+      insufficientStock: { value: { message: "Insufficient stock. Available: 10, Requested: 11" } },
+    }),
+  });
+  result.responses[401] = response("Thiếu JWT, JWT không hợp lệ/hết hạn hoặc thiếu/sai userId trong JWT", "InventoryError", {
+    noToken: { value: { message: "Access token is required" } },
+    invalidToken: { value: { message: "Invalid or expired token" } },
+    invalidActor: { value: { message: "Unauthorized" } },
+  });
+  result.responses[404] = response(type === "EXPORT"
+    ? "ProductVariant hoặc Inventory không tồn tại"
+    : "ProductVariant không tồn tại; nếu variant tồn tại nhưng chưa có Inventory thì khởi tạo từ 0",
+  "InventoryError", {
+    missingVariant: { value: { message: "Product variant not found" } },
+    ...(type === "EXPORT" && { missingInventory: { value: { message: "Inventory not found" } } }),
+  });
+  result.responses[500] = response("Lỗi hệ thống; lỗi trước commit hủy cả thay đổi tồn kho và lịch sử", "InventoryError", {
+    serverError: { value: { message: "Internal server error" } },
+  });
+  result.responses[503] = response("MongoDB standalone không hỗ trợ transaction; không thay đổi tồn kho hoặc lịch sử", "InventoryError", {
+    transactionsRequired: { value: { message: "Stock changes require MongoDB replica set or Atlas transactions" } },
+  });
+  return result;
+};
+
+// Phản hồi lỗi dùng chung cho bốn API đổi trạng thái có trừ/hoàn kho.
+const orderStockErrors = {
+  400: checkoutResponse("ID/body/số lượng không hợp lệ hoặc không đủ tồn kho; không thay đổi dữ liệu", "CheckoutError", {
+    invalidId: { value: { message: "Invalid order ID" } },
+    insufficientStock: { value: { message: "Insufficient stock for variant 507f1f77bcf86cd799439013. Available: 3, Requested: 5" } },
+  }),
+  401: checkoutResponse("Thiếu JWT, JWT không hợp lệ/hết hạn hoặc thiếu định danh người dùng", "CheckoutError"),
+  403: checkoutResponse("Không đủ quyền thực hiện thao tác hoặc Customer không sở hữu đơn cần hủy", "CheckoutError"),
+  404: checkoutResponse("Order, ProductVariant hoặc Inventory cần trừ/hoàn kho không tồn tại", "CheckoutError", {
+    missingOrder: { value: { message: "Order not found" } },
+    missingVariant: { value: { message: "Product variant not found: 507f1f77bcf86cd799439013" } },
+    missingInventory: { value: { message: "Inventory not found for variant(s): 507f1f77bcf86cd799439013" } },
+  }),
+  409: checkoutResponse("Trạng thái lặp/trái quy tắc, lịch sử kho không khớp, dữ liệu tồn kho lỗi, thanh toán đã hoàn tất hoặc xung đột ghi", "CheckoutError", {
+    repeated: { value: { message: 'Order already has status "confirmed"' } },
+    historyMismatch: { value: { message: "Stock deduction history does not match order items" } },
+    paidOrder: { value: { message: "Cannot reject or cancel order: payment has already been completed. Refund workflow is not implemented." } },
+    concurrentUpdate: { value: { message: "Order status has already been changed by another request" } },
+  }),
+  500: checkoutResponse("Lỗi hệ thống; lỗi trước commit rollback transaction, không lộ thông tin nội bộ", "CheckoutError", {
+    serverError: { value: { message: "Internal server error" } },
+  }),
+  503: checkoutResponse("MongoDB standalone không hỗ trợ transaction: không đổi trạng thái, số lượng hoặc lịch sử", "CheckoutError", {
+    transactionsRequired: { value: { message: "Order status changes require MongoDB replica set or Atlas transactions" } },
+  }),
+};
+
 definition.paths = {
+  "/api/inventory": {
+    get: operation("Xem tồn kho, SKU và thuộc tính biến thể",
+      "Trả các Inventory đã khởi tạo, gồm cả variant/product đã vô hiệu hóa. Phân trang, mới nhất trước. " +
+      "Variant chưa có Inventory được khởi tạo khi nhập hàng hoặc điều chỉnh lần đầu.", "InventoryList", listParams),
+  },
+  "/api/inventory/low-stock": {
+    get: operation("Xem sản phẩm sắp hết hàng",
+      "Lọc quantity <= lowStockThreshold, bao gồm quantity=0. Dùng ngưỡng riêng của từng Inventory.",
+      "InventoryList", listParams),
+  },
+  "/api/inventory/transactions": {
+    // Tra cứu lịch sử không sửa kho; bộ lọc không khớp trả danh sách rỗng, không trả lỗi thiếu kho.
+    get: {
+      tags: ["Inventory"],
+      summary: "Xem lịch sử biến động kho",
+      description:
+        "STORAGE_MANAGER và ADMIN được xem; CUSTOMER và STAFF bị từ chối với 403. " +
+        "Trả { transactions, pagination }, sắp xếp createdAt giảm dần rồi _id giảm dần khi trùng thời gian. " +
+        "variantId được populate SKU, thuộc tính biến thể và productId.name từ ProductVariant/Product; " +
+        "SKU không được lưu trùng trong lịch sử. createdBy là trường người thao tác hiện có, " +
+        "tương đương performedBy, chỉ populate _id và fullName; không trả mật khẩu hay email. " +
+        "Nếu variant, product hoặc người thao tác đã bị xóa thì liên kết được populate thành null, lịch sử vẫn được trả. " +
+        "Bao gồm IMPORT/EXPORT/ADJUSTMENT và DEDUCTION/RESTORE của đơn hàng; quantity là độ lớn thay đổi, " +
+        "ADJUSTMENT có thể bằng 0. Các bộ lọc được kết hợp đồng thời. " +
+        "from/to là thời gian ISO 8601 có múi giờ, bao gồm hai mốc; from không được lớn hơn to. " +
+        "Không có bản ghi khớp (kể cả variantId hợp lệ nhưng không tồn tại) trả 200 với transactions=[] " +
+        "và totalItems=totalPages=0. Trang vượt tổng số trang trả mảng rỗng, giữ tổng số bản ghi khớp. " +
+        "Chỉ đọc dữ liệu, không thay đổi Inventory hay tạo StockTransaction; không yêu cầu MongoDB transaction.",
+      security: [{ bearerAuth: [] }],
+      parameters: [
+        ...pageParams,
+        { name: "variantId", in: "query", description: "Lọc chính xác ProductVariant ObjectId gồm 24 ký tự hex; không truyền SKU.", schema: id },
+        { name: "type", in: "query", description: "Loại biến động, phân biệt chữ hoa/thường; dùng enum hiện có của StockTransaction.", schema: { type: "string", enum: STOCK_TRANSACTION_TYPES } },
+        { name: "from", in: "query", description: "createdAt >= from; ISO 8601 có Z hoặc múi giờ như +07:00. Mã hóa dấu + thành %2B khi viết trực tiếp URL.", schema: { type: "string", format: "date-time", example: "2026-09-01T00:00:00.000Z" } },
+        { name: "to", in: "query", description: "createdAt <= to; ISO 8601 có múi giờ, phải >= from khi truyền cả hai mốc.", schema: { type: "string", format: "date-time", example: "2026-09-30T23:59:59.999Z" } },
+      ],
+      responses: {
+        200: response("Lịch sử kho theo bộ lọc và thông tin phân trang", "StockTransactionList", {
+          populated: { summary: "Lịch sử nhập kho có SKU, sản phẩm và người thao tác", value: {
+            transactions: [{
+              _id: "507f1f77bcf86cd799439013",
+              inventoryId: "507f1f77bcf86cd799439011",
+              variantId: {
+                _id: "507f1f77bcf86cd799439012", sku: "SOFA-MILANO-BEIGE-L",
+                color: "Beige", size: "L", material: "Vải", isActive: true,
+                productId: { _id: "507f1f77bcf86cd799439015", name: "Sofa Milano", isActive: true },
+              },
+              type: "IMPORT", quantity: 10, beforeQuantity: 20, afterQuantity: 30,
+              createdBy: { _id: "507f1f77bcf86cd799439014", fullName: "Nguyễn Văn Kho" },
+              note: "Nhập thêm hàng", createdAt: "2026-09-24T03:00:00.000Z", updatedAt: "2026-09-24T03:00:00.000Z",
+            }],
+            pagination: { page: 1, limit: 20, totalItems: 1, totalPages: 1 },
+          } },
+          empty: { summary: "Không có lịch sử khớp bộ lọc", value: {
+            transactions: [], pagination: { page: 1, limit: 20, totalItems: 0, totalPages: 0 },
+          } },
+        }),
+        400: response("variantId/type/ngày/phân trang không hợp lệ, from > to hoặc query chứa trường không hỗ trợ", "InventoryError", {
+          invalidVariantId: { value: { message: "Validation failed", errors: [{
+            origin: "string", code: "invalid_format", format: "regex", pattern: "/^[a-fA-F0-9]{24}$/",
+            path: ["variantId"], message: "Invalid variant ID",
+          }] } },
+          invalidRange: { value: { message: "Validation failed", errors: [{
+            code: "custom", path: ["to"], message: "from must not be later than to",
+          }] } },
+        }),
+        401: response("Thiếu JWT hoặc JWT không hợp lệ/hết hạn", "InventoryError", {
+          noToken: { value: { message: "Access token is required" } },
+          invalidToken: { value: { message: "Invalid or expired token" } },
+        }),
+        403: response("Chỉ STORAGE_MANAGER và ADMIN được xem; CUSTOMER và STAFF bị từ chối", "InventoryError", {
+          wrongRole: { value: { message: "Forbidden: insufficient permission" } },
+        }),
+        500: response("Lỗi hệ thống khi đọc lịch sử", "InventoryError", {
+          serverError: { value: { message: "Internal server error" } },
+        }),
+      },
+    },
+  },
+  "/api/inventory/{variantId}": {
+    get: operation("Xem tồn kho một biến thể", "Trả 404 nếu Variant hoặc Inventory chưa tồn tại.", "InventoryDetail", [variantParam]),
+  },
+  "/api/inventory/{variantId}/import": {
+    post: mutation("Nhập hàng", "Tăng tồn kho với quantity nguyên dương; tự khởi tạo Inventory nếu chưa có. Ghi IMPORT.", "StockMovementInput", {
+      type: "IMPORT", beforeQuantity: 20, afterQuantity: 30,
+      input: { quantity: 10, note: "Nhập thêm hàng" }, message: "Stock imported successfully",
+    }),
+  },
+  "/api/inventory/{variantId}/export": {
+    post: mutation("Xuất hàng", "Giảm tồn kho với quantity nguyên dương. Inventory phải tồn tại; thiếu hàng trả 400, không để tồn kho âm. Ghi EXPORT.", "StockMovementInput", {
+      type: "EXPORT", beforeQuantity: 10, afterQuantity: 7,
+      input: { quantity: 3, note: "Xuất kho" }, message: "Stock exported successfully",
+    }),
+  },
+  "/api/inventory/{variantId}/adjust": {
+    patch: mutation("Điều chỉnh sau kiểm kê", "Đặt tồn kho bằng quantity mới (nguyên, >=0). Tự khởi tạo Inventory nếu chưa có. Ghi ADJUSTMENT với số lượng trước/sau.", "StockAdjustmentInput", {
+      type: "ADJUSTMENT", beforeQuantity: 20, afterQuantity: 15,
+      input: { quantity: 15, note: "Kiểm kê kho thực tế" }, message: "Stock adjusted successfully",
+    }),
+  },
+  "/api/inventory/{variantId}/threshold": {
+    patch: operation("Cập nhật ngưỡng low-stock",
+      "Chỉ cập nhật lowStockThreshold của Inventory đã tồn tại; không thay đổi quantity, không tạo stock transaction.",
+      "StockThresholdResult", [variantParam], "StockThresholdInput", true),
+  },
   // Tạo Order dành cho Customer và lưu toàn bộ snapshot trong một document.
   "/api/orders": {
     post: {
@@ -713,232 +1064,111 @@ definition.paths = {
     },
   },
   /**
-   * Mục đích: mô tả API trạng thái dành riêng cho STAFF/ADMIN.
-   * Quy tắc chỉ cho pending sang confirmed, rejected hoặc cancelled; không cho lặp/lùi.
-   * Task 1 chặn toàn bộ chuyển trạng thái hợp lệ vì chưa có nghiệp vụ Task 2–4.
-   * Phản hồi 200 chỉ là hợp đồng cho giai đoạn sau, không mô tả là đã hoạt động.
+   * Dùng các endpoint Order hiện có; backend tự trừ/hoàn kho theo trạng thái.
+   * Mọi thay đổi Order/Inventory/StockTransaction cần replica set hoặc Atlas.
    */
   "/api/orders/{id}/status": {
     patch: {
       tags: ["Order"],
-      summary: "STAFF/ADMIN yêu cầu cập nhật trạng thái Order",
+      summary: "STAFF/ADMIN cập nhật trạng thái Order và tự động xử lý kho",
       description:
-        "Chỉ STAFF và ADMIN được gọi; CUSTOMER và STORAGE_MANAGER bị từ chối với 403. " +
-        "Body bắt buộc có duy nhất status dạng chuỗi thuộc enum. Order ID phải là ObjectId 24 ký tự hex. " +
-        "Quy tắc: pending → confirmed/rejected/cancelled; cùng trạng thái hoặc mọi chuyển khác trả 409. " +
-        "Cả ba chuyển trạng thái đều được delegate sang Service chuyên biệt: " +
-        "- confirmed: delegate sang confirmOrder (kiểm tra và trừ kho atomic). " +
-        "- rejected: delegate sang rejectOrder (không hoàn kho do pending chưa trừ). " +
-        "- cancelled: delegate sang cancelOrder (kiểm tra quyền, kiểm tra thanh toán, không hoàn kho). " +
-        "Không có đường tắt nào cho phép bỏ qua nghiệp vụ hoặc ghi đè trạng thái. " +
-        "Cập nhật luôn kèm điều kiện trạng thái pending để hai request không cùng ghi đè một đơn.",
+        "Chỉ STAFF và ADMIN được gọi; CUSTOMER và STORAGE_MANAGER trả 403. " +
+        "Body chỉ có status. Quy tắc: pending → confirmed/rejected/cancelled; confirmed → rejected/cancelled. " +
+        "Cùng trạng thái, chuyển về pending hoặc chuyển tiếp từ rejected/cancelled trả 409. " +
+        "confirmed gọi confirmOrder để kiểm tra tất cả variant/tồn kho, trừ kho và ghi DEDUCTION. " +
+        "rejected/cancelled dùng chung nghiệp vụ đóng đơn: chỉ hoàn kho nếu nguồn là confirmed và lịch sử trừ khớp toàn bộ items. " +
+        "Không đủ hàng trả 400; thiếu Variant/Inventory trả 404. " +
+        "Trạng thái đơn, toàn bộ tồn kho và lịch sử commit cùng một transaction. " +
+        "Cần MongoDB replica set/Atlas; standalone trả 503, không có cơ chế ghi riêng lẻ thay thế.",
       security: [{ bearerAuth: [] }],
       parameters: [idParam()],
       requestBody: requestBody("UpdateOrderStatusInput"),
       responses: {
-        200: checkoutResponse(
-          "Cập nhật trạng thái đơn hàng thành công",
-          "OrderStatusUpdated"
-        ),
-        400: checkoutResponse("Order ID sai định dạng; thiếu status, sai kiểu/enum hoặc có trường body không được phép", "CheckoutError", {
-          invalidId: { value: { message: "Invalid order ID" } },
-          unexpectedField: { value: {
-            message: "Validation failed",
-            errors: [{ code: "unrecognized_keys", keys: ["totalAmount"], path: [], message: 'Unrecognized key: "totalAmount"' }],
+        ...orderStockErrors,
+        200: checkoutResponse("Đổi trạng thái và xử lý kho thành công", "OrderStatusUpdated", {
+          confirmed: { value: {
+            message: "Order status updated successfully",
+            order: { _id: "507f1f77bcf86cd799439011", status: "confirmed", updatedAt: "2026-09-24T03:00:00.000Z" },
           } },
-        }),
-        401: checkoutResponse("Thiếu JWT hoặc JWT không hợp lệ/hết hạn", "CheckoutError", {
-          missingToken: { value: { message: "Access token is required" } },
-          invalidToken: { value: { message: "Invalid or expired token" } },
-        }),
-        403: checkoutResponse("Role không phải STAFF hoặc ADMIN, bao gồm CUSTOMER và STORAGE_MANAGER", "CheckoutError", {
-          forbidden: { value: { message: "Forbidden: insufficient permission" } },
-        }),
-        404: checkoutResponse("Order không tồn tại", "CheckoutError", {
-          missingOrder: { value: { message: "Order not found" } },
-        }),
-        409: checkoutResponse("Cùng trạng thái, chuyển trái quy tắc, thiếu hàng hoặc race condition", "CheckoutError", {
-          unchanged: { value: { message: 'Order already has status "pending"' } },
-          invalidTransition: { value: { message: 'Cannot change order status from "confirmed" to "pending"' } },
-          insufficientStock: { value: { message: "Insufficient stock for variant(s): 507f1f77bcf86cd799439013" } },
-          raceCondition: { value: { message: "Order status has already been changed by another request" } },
-        }),
-        500: checkoutResponse("Lỗi hệ thống; không trả stack trace hoặc chi tiết nội bộ", "CheckoutError", {
-          serverError: { value: { message: "Internal server error" } },
         }),
       },
     },
   },
-  /**
-   * Mục đích: mô tả API xác nhận đơn hàng (Task 2).
-   * Chỉ cho phép pending → confirmed. Kiểm tra tồn kho trước khi xác nhận.
-   * Trừ kho atomic bằng bulkWrite $gte. Cập nhật Order có điều kiện status pending.
-   */
   "/api/orders/{id}/confirm": {
     patch: {
       tags: ["Order"],
-      summary: "STAFF/ADMIN xác nhận đơn hàng (pending → confirmed)",
+      summary: "STAFF/ADMIN xác nhận đơn pending và trừ kho một lần",
       description:
-        "Chỉ STAFF và ADMIN được gọi; CUSTOMER và STORAGE_MANAGER bị từ chối với 403. " +
-        "Không cần body; chỉ cần Order ID hợp lệ trên URL. " +
-        "Chỉ cho phép chuyển trạng thái pending → confirmed; các trạng thái khác trả 409. " +
-        "Đơn hàng pending chưa bao giờ trừ kho; xác nhận là thời điểm trừ kho duy nhất. " +
-        "Kiểm tra Inventory của từng variant trước khi trừ; thiếu bản ghi Inventory hoặc không đủ hàng trả 409. " +
-        "Gộp quantity các dòng cùng variant trước khi so sánh Inventory.quantity. " +
-        "Trừ kho bằng bulkWrite updateOne có điều kiện $gte để ngăn tồn kho âm. " +
-        "Cập nhật Order bằng findOneAndUpdate với điều kiện status=pending để xử lý concurrency. " +
-        "Nếu hai request confirm đồng thời: cả hai đều vượt kiểm tra tồn kho nhưng chỉ một ghi được Order; cái còn lại trả 409. " +
-        "Race condition hy hoi: môi trường standalone không có multi-document transaction; " +
-        "STAFF/ADMIN kiểm tra lại nếu thấy 409 sau khi đã trừ kho một phần. " +
-        "Endpoint PATCH /status được delegate sang đây; không có đường tắt bỏ qua nghiệp vụ.",
+        "Chỉ STAFF và ADMIN được gọi. Không cần body. Chỉ pending → confirmed được phép. " +
+        "OrderItem tham chiếu ProductVariant; gộp quantity các dòng cùng variant trước khi kiểm tra. " +
+        "Kiểm tra toàn bộ ProductVariant, Inventory và số lượng an toàn trước khi ghi bất kỳ dòng nào. " +
+        "Thiếu hàng trả 400; thiếu Variant/Inventory trả 404 và giữ nguyên toàn bộ đơn/kho/lịch sử. " +
+        "Trừ kho bằng cập nhật có điều kiện số lượng đã đọc và $gte, ngăn tồn kho âm. " +
+        "Ghi DEDUCTION với orderId, inventoryId, variantId, quantity, beforeQuantity, afterQuantity, createdBy từ JWT và note. " +
+        "Kiểm tra trạng thái/lịch sử và unique index orderId+variantId+type chống trừ hai lần. " +
+        "Order, Inventory và StockTransaction commit cùng transaction; lỗi trước commit rollback mọi thay đổi. " +
+        "Gọi lại hoặc confirm đồng thời cùng đơn: chỉ một lần trừ kho, yêu cầu còn lại trả 409. " +
+        "Cần replica set/Atlas; standalone trả 503 trước khi thay đổi dữ liệu.",
       security: [{ bearerAuth: [] }],
       parameters: [idParam()],
       responses: {
-        200: checkoutResponse("Đƣ xác nhận đơn hàng và trừ kho thành công", "OrderConfirmRejectResult", {
-          confirmed: { value: { message: "Order confirmed successfully", data: { _id: "507f1f77bcf86cd799439011", status: "confirmed", updatedAt: "2026-09-22T01:30:00.000Z" } } },
-        }),
-        400: checkoutResponse("Order ID sai định dạng", "CheckoutError", {
-          invalidId: { value: { message: "Invalid order ID" } },
-        }),
-        401: checkoutResponse("Thiếu JWT hoặc JWT không hợp lệ/hết hạn", "CheckoutError", {
-          missingToken: { value: { message: "Access token is required" } },
-          invalidToken: { value: { message: "Invalid or expired token" } },
-        }),
-        403: checkoutResponse("Role không phải STAFF hoặc ADMIN", "CheckoutError", {
-          forbidden: { value: { message: "Forbidden: insufficient permission" } },
-        }),
-        404: checkoutResponse("Đơn không tồn tại", "CheckoutError", {
-          missingOrder: { value: { message: "Order not found" } },
-        }),
-        409: checkoutResponse("Đơn không ở trạng thái pending, thiếu hàng hoặc race condition", "CheckoutError", {
-          notPending: { value: { message: 'Cannot change order status from "confirmed" to "confirmed"' } },
-          alreadyRejected: { value: { message: 'Cannot change order status from "rejected" to "confirmed"' } },
-          alreadyCancelled: { value: { message: 'Cannot change order status from "cancelled" to "confirmed"' } },
-          insufficientStock: { value: { message: "Insufficient stock for variant(s): 507f1f77bcf86cd799439013" } },
-          raceCondition: { value: { message: "Order status has already been changed by another request" } },
-          concurrentStock: { value: { message: "Insufficient stock detected during concurrent update. Please retry confirming the order." } },
-        }),
-        500: checkoutResponse("Lỗi hệ thống; không trả stack trace", "CheckoutError", {
-          serverError: { value: { message: "Internal server error" } },
+        ...orderStockErrors,
+        200: checkoutResponse("Đã xác nhận và trừ kho", "OrderConfirmRejectResult", {
+          confirmed: { value: {
+            message: "Order confirmed successfully",
+            data: { _id: "507f1f77bcf86cd799439011", status: "confirmed", updatedAt: "2026-09-24T03:00:00.000Z" },
+          } },
         }),
       },
     },
   },
-  /**
-   * Mục đích: mô tả API từ chối đơn hàng (Task 2).
-   * Chỉ cho phép pending → rejected. Pending chưa trừ kho nên không cần hoàn kho.
-   * Cập nhật Order có điều kiện status pending để ngăn concurrency.
-   */
   "/api/orders/{id}/reject": {
     patch: {
       tags: ["Order"],
-      summary: "STAFF/ADMIN từ chối đơn hàng (pending → rejected)",
+      summary: "STAFF/ADMIN từ chối đơn pending/confirmed; hoàn kho nếu đã trừ",
       description:
-        "Chỉ STAFF và ADMIN được gọi; CUSTOMER và STORAGE_MANAGER bị từ chối với 403. " +
-        "Không cần body; chỉ cần Order ID hợp lệ trên URL. " +
-        "Chỉ cho phép chuyển trạng thái pending → rejected; các trạng thái khác trả 409. " +
-        "Đơn hàng pending chưa trừ kho nên từ chối không cần hoàn kho. " +
-        "Nếu tương lai có nghiệp vụ giữ hàng lúc tạo đơn, logic hoàn kho sẽ cần cập nhật. " +
-        "Không xóa Order hoặc OrderItems khỏi database. " +
-        "Không thêm rejectionReason vì schema Order chưa có trường này. " +
-        "Cập nhật Order bằng findOneAndUpdate với điều kiện status=pending: nếu một request confirm chạy trước, " +
-        "Order không còn pending và reject trả 409; tránh ghi đè sau khi đã xác nhận. " +
-        "Endpoint PATCH /status được delegate sang đây; không có đường tắt bỏ qua nghiệp vụ.",
+        "Chỉ STAFF và ADMIN được gọi; không cần body. pending → rejected không cộng kho vì chưa từng trừ. " +
+        "confirmed → rejected hoàn đúng quantity theo lịch sử DEDUCTION, sau khi đối chiếu đầy đủ với Order.items. " +
+        "Lịch sử thiếu/không khớp hoặc đã có RESTORE trả 409. Thiếu Variant/Inventory khi hoàn kho trả 404; không ghi RESTORE giả. " +
+        "Ghi RESTORE với before/after, orderId, variantId, inventoryId, createdBy từ JWT và note. " +
+        "Trạng thái, tồn kho, lịch sử nằm trong cùng transaction; cùng trạng thái/đơn đã cancelled trả 409, không hoàn lần hai. " +
+        "Giữ chính sách thanh toán hiện có: Payment paid chặn thao tác với 409; Payment pending chuyển cancelled khi đóng đơn. " +
+        "Cần replica set/Atlas; standalone trả 503. PATCH /status với status=rejected dùng cùng nghiệp vụ.",
       security: [{ bearerAuth: [] }],
       parameters: [idParam()],
       responses: {
-        200: checkoutResponse("Đã từ chối đơn hàng thành công", "OrderConfirmRejectResult", {
-          rejected: { value: { message: "Order rejected successfully", data: { _id: "507f1f77bcf86cd799439011", status: "rejected", updatedAt: "2026-09-22T01:30:00.000Z" } } },
-        }),
-        400: checkoutResponse("Order ID sai định dạng", "CheckoutError", {
-          invalidId: { value: { message: "Invalid order ID" } },
-        }),
-        401: checkoutResponse("Thiếu JWT hoặc JWT không hợp lệ/hết hạn", "CheckoutError", {
-          missingToken: { value: { message: "Access token is required" } },
-          invalidToken: { value: { message: "Invalid or expired token" } },
-        }),
-        403: checkoutResponse("Role không phải STAFF hoặc ADMIN", "CheckoutError", {
-          forbidden: { value: { message: "Forbidden: insufficient permission" } },
-        }),
-        404: checkoutResponse("Đơn không tồn tại", "CheckoutError", {
-          missingOrder: { value: { message: "Order not found" } },
-        }),
-        409: checkoutResponse("Đơn không ở trạng thái pending hoặc race condition", "CheckoutError", {
-          notPending: { value: { message: 'Cannot change order status from "rejected" to "rejected"' } },
-          alreadyConfirmed: { value: { message: 'Cannot change order status from "confirmed" to "rejected"' } },
-          alreadyCancelled: { value: { message: 'Cannot change order status from "cancelled" to "rejected"' } },
-          raceCondition: { value: { message: "Order status has already been changed by another request" } },
-        }),
-        500: checkoutResponse("Lỗi hệ thống; không trả stack trace", "CheckoutError", {
-          serverError: { value: { message: "Internal server error" } },
+        ...orderStockErrors,
+        200: checkoutResponse("Đã từ chối đơn và hoàn kho nếu đã confirmed", "OrderConfirmRejectResult", {
+          rejected: { value: {
+            message: "Order rejected successfully",
+            data: { _id: "507f1f77bcf86cd799439011", status: "rejected", updatedAt: "2026-09-24T03:00:00.000Z" },
+          } },
         }),
       },
     },
   },
-  /**
-   * Mục đích: mô tả API hủy đơn hàng (Task 3).
-   * CUSTOMER chỉ được hủy đơn của chính mình; STAFF/ADMIN được hủy đơn hợp lệ; STORAGE_MANAGER bị từ chối với 403.
-   * Chỉ cho phép pending → cancelled. Pending chưa trừ kho nên không hoàn kho.
-   * Cập nhật Order có điều kiện status pending để ngăn race condition.
-   */
   "/api/orders/{id}/cancel": {
     patch: {
       tags: ["Order"],
-      summary: "CUSTOMER hủy đơn của mình / STAFF, ADMIN hủy đơn hợp lệ (pending → cancelled)",
+      summary: "Customer hủy đơn của mình / STAFF, ADMIN hủy đơn pending hoặc confirmed",
       description:
-        "CUSTOMER (chỉ được hủy đơn do chính mình tạo), STAFF và ADMIN được gọi; " +
-        "STORAGE_MANAGER bị từ chối với 403 Forbidden. " +
-        "CUSTOMER hủy đơn của người khác bị từ chối với 403 Forbidden. " +
-        "Không cần body; chỉ cần Order ID hợp lệ trên URL. " +
-        "Chỉ cho phép chuyển trạng thái pending → cancelled. " +
-        "Đơn đã cancelled hoặc rejected: trả 409 Conflict. " +
-        "Đơn đã confirmed: trả 409 Conflict vì Task 4 (hoàn kho) và quy trình hoàn tiền chưa triển khai. " +
-        "Đơn pending chưa từng bị trừ kho khi tạo nên không hoàn kho (tránh tăng khống tồn kho). " +
-        "Nếu đơn có Payment đã thanh toán ('paid'), chặn hủy với 409 Conflict do chưa có Refund API. " +
-        "Nếu đơn có Payment đang 'pending', trạng thái Payment sẽ được đồng bộ cập nhật sang 'cancelled'. " +
-        "Không xóa Order hoặc OrderItems khỏi database. " +
-        "Cập nhật Order bằng findOneAndUpdate với điều kiện status=pending để xử lý concurrency: " +
-        "nếu hai request Cancel hoặc 1 Confirm + 1 Cancel chạy đồng thời, chỉ một request thành công; " +
-        "request còn lại trả 409 Conflict. " +
-        "Endpoint PATCH /status khi gửi status=cancelled cũng được delegate sang đây.",
+        "CUSTOMER chỉ được hủy đơn của mình; STAFF/ADMIN được hủy đơn hợp lệ. STORAGE_MANAGER trả 403. " +
+        "Không cần body. pending → cancelled không cộng kho; confirmed → cancelled hoàn theo DEDUCTION đã lưu. " +
+        "Lịch sử phải đầy đủ, khớp Order.items và chưa có RESTORE. Thiếu Variant/Inventory trả 404 và giữ nguyên đơn/kho/lịch sử. " +
+        "RESTORE lưu số trước/sau và createdBy từ JWT. Gọi lại hoặc reject/cancel đồng thời chỉ hoàn một lần. " +
+        "Nếu Payment paid, trả 409 do chưa có quy trình hoàn tiền; Payment pending được đồng bộ cancelled trong cùng transaction. " +
+        "Order, Inventory và StockTransaction commit cùng transaction trên replica set/Atlas. " +
+        "Standalone trả 503, không có thao tác cộng/trừ bù ngoài transaction. " +
+        "PATCH /status với status=cancelled dùng cùng nghiệp vụ, vẫn chỉ cho STAFF/ADMIN.",
       security: [{ bearerAuth: [] }],
       parameters: [idParam()],
       responses: {
-        200: checkoutResponse("Đã hủy đơn hàng thành công", "OrderConfirmRejectResult", {
-          cancelled: {
-            value: {
-              message: "Order cancelled successfully",
-              data: {
-                _id: "507f1f77bcf86cd799439011",
-                status: "cancelled",
-                updatedAt: "2026-09-22T01:30:00.000Z",
-              },
-            },
-          },
-        }),
-        400: checkoutResponse("Order ID sai định dạng", "CheckoutError", {
-          invalidId: { value: { message: "Invalid order ID" } },
-        }),
-        401: checkoutResponse("Thiếu JWT hoặc JWT không hợp lệ/hết hạn", "CheckoutError", {
-          missingToken: { value: { message: "Access token is required" } },
-          invalidToken: { value: { message: "Invalid or expired token" } },
-        }),
-        403: checkoutResponse("Role không được phép hoặc Customer không sở hữu Order", "CheckoutError", {
-          notOwner: { value: { message: "You do not have permission to cancel this order" } },
-          forbiddenRole: { value: { message: "Forbidden: insufficient permission" } },
-        }),
-        404: checkoutResponse("Đơn không tồn tại", "CheckoutError", {
-          missingOrder: { value: { message: "Order not found" } },
-        }),
-        409: checkoutResponse("Đơn không ở trạng thái pending, đã thanh toán hoặc race condition", "CheckoutError", {
-          alreadyCancelled: { value: { message: 'Order already has status "cancelled"' } },
-          alreadyRejected: { value: { message: 'Cannot change order status from "rejected" to "cancelled"' } },
-          alreadyConfirmed: { value: { message: 'Cannot change order status from "confirmed" to "cancelled"' } },
-          paymentCompleted: { value: { message: "Cannot cancel order: payment has already been completed. Refund workflow is not implemented." } },
-          raceCondition: { value: { message: "Order status has already been changed by another request" } },
-        }),
-        500: checkoutResponse("Lỗi hệ thống; không trả stack trace", "CheckoutError", {
-          serverError: { value: { message: "Internal server error" } },
+        ...orderStockErrors,
+        200: checkoutResponse("Đã hủy đơn và hoàn kho nếu đã confirmed", "OrderConfirmRejectResult", {
+          cancelled: { value: {
+            message: "Order cancelled successfully",
+            data: { _id: "507f1f77bcf86cd799439011", status: "cancelled", updatedAt: "2026-09-24T03:00:00.000Z" },
+          } },
         }),
       },
     },
