@@ -495,6 +495,37 @@ const definition = {
         },
       },
 
+      CreateUserByAdmin: {
+        type: "object",
+        required: ["fullName", "email", "password", "role"],
+        properties: {
+          fullName: {
+            type: "string",
+            example: "Staff FurnitureHub",
+          },
+          email: {
+            type: "string",
+            format: "email",
+            example: "staff@gmail.com",
+          },
+          password: {
+            type: "string",
+            format: "password",
+            example: "123456",
+          },
+          phone: {
+            type: "string",
+            example: "0123456789",
+          },
+          role: {
+            type: "string",
+            enum: ["STAFF", "STORAGE_MANAGER"],
+            example: "STAFF",
+            description: "Chỉ chấp nhận STAFF hoặc STORAGE_MANAGER",
+          },
+        },
+      },
+
       Category: {
         type: "object",
         required: ["name"],
@@ -643,6 +674,7 @@ const definition = {
   tags: [
     { name: "Address", description: "Quản lý địa chỉ giao hàng" },
     { name: "Auth", description: "Xác thực người dùng" },
+    { name: "User", description: "Quản lý người dùng — ADMIN tạo tài khoản STAFF và STORAGE_MANAGER" },
     { name: "Cart", description: "Quản lý giỏ hàng" },
     { name: "Checkout", description: "Kiểm tra điều kiện checkout" },
     { name: "Order", description: "Tạo, xem chi tiết và kiểm soát trạng thái đơn hàng" },
@@ -1394,6 +1426,19 @@ definition.paths = {
       tag: "Auth",
       summary: "Đăng nhập và nhận JWT",
       body: requestBody("Login"),
+    }),
+  },
+
+  // ================= USER =================
+
+  "/api/users": {
+    post: api({
+      tag: "User",
+      summary: "ADMIN tạo tài khoản STAFF hoặc STORAGE_MANAGER",
+      secured: true,
+      body: requestBody("CreateUserByAdmin"),
+      success: 201,
+      description: "Chỉ dành cho ADMIN. Chỉ cho phép tạo tài khoản có vai trò STAFF hoặc STORAGE_MANAGER. Tuyệt đối không cho phép tạo CUSTOMER hoặc ADMIN qua API này.",
     }),
   },
 
