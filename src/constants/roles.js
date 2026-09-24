@@ -3,6 +3,6 @@ const ROLES = {
   STAFF: "STAFF",
   STORAGE_MANAGER: "STORAGE_MANAGER",
   ADMIN: "ADMIN",
-};hãy
+};
 
 module.exports = ROLES;
