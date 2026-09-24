@@ -19,6 +19,7 @@ const cors = require("cors");
 // Import các Router hiện tại của FurnitureHub.
 const categoryRoute = require("./routes/category.route");
 const authRoute = require("./routes/auth.route");
+const userRoute = require("./routes/user.route");
 const brandRoute = require("./routes/brand.route");
 const productRoute = require("./routes/product.route");
 
@@ -150,12 +151,15 @@ app.use("/api/orders/:orderId/payment", orderPaymentRoute);
 app.use("/api/payments", paymentRoute);
 app.use("/api/inventory", inventoryRoute);
 
+// User: ADMIN tạo tài khoản nhân viên (STAFF hoặc STORAGE_MANAGER).
+app.use("/api/users", userRoute);
+
 /**
  * Lỗi JSON xảy ra trước Router; trả 400 dạng JSON cho Order và Inventory.
  * Không để Express trả trang lỗi chứa stack khi body bị hỏng hoặc là null.
  * Các lỗi khác tiếp tục đi theo cơ chế xử lý hiện tại của ứng dụng.
  */
-app.use(["/api/orders", "/api/inventory"], (error, req, res, next) => {
+app.use(["/api/orders", "/api/inventory", "/api/users"], (error, req, res, next) => {
   if (error.type === "entity.parse.failed") {
     return res.status(400).json({ message: "Invalid JSON body" });
   }
