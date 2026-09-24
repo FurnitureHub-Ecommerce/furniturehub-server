@@ -14,12 +14,14 @@ const inventorySchema = new mongoose.Schema(
       required: true,
       default: 0,
       min: 0,
+      validate: Number.isSafeInteger,
     },
 
     lowStockThreshold: {
       type: Number,
       default: 3,
       min: 0,
+      validate: Number.isSafeInteger,
     },
   },
   {

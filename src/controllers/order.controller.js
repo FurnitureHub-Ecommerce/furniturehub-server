@@ -5,12 +5,12 @@
 const orderService = require("../services/order.service");
 
 /**
- * Nhận lỗi Service và response; chỉ công bố lỗi nghiệp vụ 400/404/409 đã định nghĩa.
+ * Trả lỗi nghiệp vụ và phân quyền đã định nghĩa; 503 khi database không hỗ trợ transaction.
  * Lỗi Cart trả nguyên chẩn đoán từ Task 3 để client xác định dòng thiếu hàng/sai giá.
  * Các lỗi database hoặc lỗi ngoài dự kiến trả 500 chung, không gửi stack/URI.
  */
 const handleError = (res, error) => {
-  const statusCode = [400, 403, 404, 409].includes(error.statusCode) ? error.statusCode : 500;
+  const statusCode = [400, 401, 403, 404, 409, 503].includes(error.statusCode) ? error.statusCode : 500;
   if (statusCode === 400 && error.details) return res.status(400).json(error.details);
   return res.status(statusCode).json({
     message: statusCode === 500 ? "Internal server error" : error.message,
@@ -47,7 +47,7 @@ const getOrderById = async (req, res) => {
 
 /**
  * Chuyển ID và status đã validate tới Service sau khi Route kiểm tra STAFF/ADMIN.
- * Sau Task 2 & Task 3: confirmed/rejected/cancelled được delegate sang Service chuyên biệt.
+ * Confirmed/rejected/cancelled được chuyển sang Service chuyên biệt có xử lý kho.
  * Controller không tự ghi status.
  */
 const updateOrderStatus = async (req, res) => {
@@ -68,7 +68,7 @@ const updateOrderStatus = async (req, res) => {
  */
 const confirmOrder = async (req, res) => {
   try {
-    const order = await orderService.confirmOrder(req.params.id);
+    const order = await orderService.confirmOrder(req.params.id, req.user);
     return res.status(200).json({
       message: "Order confirmed successfully",
       data: order,
@@ -79,15 +79,15 @@ const confirmOrder = async (req, res) => {
 };
 
 /**
- * Mục đích: từ chối đơn hàng (pending → rejected) bởi STAFF hoặc ADMIN.
+ * Mục đích: từ chối đơn hàng (pending/confirmed → rejected) bởi STAFF hoặc ADMIN.
  * Nhận id từ URL đã qua validateOrderId; không cần body.
  * Gọi Service kiểm tra quy tắc trạng thái và cập nhật Order an toàn.
- * Pending chưa trừ kho nên reject không cần hoàn kho.
+ * Pending chưa trừ kho; confirmed phải hoàn kho và ghi người thực hiện từ JWT.
  * Thành công trả 200 với { message, data }; mọi lỗi đi qua handleError.
  */
 const rejectOrder = async (req, res) => {
   try {
-    const order = await orderService.rejectOrder(req.params.id);
+    const order = await orderService.rejectOrder(req.params.id, req.user);
     return res.status(200).json({
       message: "Order rejected successfully",
       data: order,
@@ -101,13 +101,13 @@ const rejectOrder = async (req, res) => {
  * @Author: Minh Truong
  *
  * Mục đích:
- * Hủy đơn hàng (pending → cancelled) bởi CUSTOMER (chính chủ), STAFF hoặc ADMIN.
+ * Hủy đơn hàng (pending/confirmed → cancelled) bởi CUSTOMER (chính chủ), STAFF hoặc ADMIN.
  * Nhận id từ URL đã qua validateOrderId; không cần body.
  * Gọi Service thực hiện đầy đủ nghiệp vụ:
  * - Kiểm tra quyền sở hữu (CUSTOMER chỉ hủy đơn của chính mình).
- * - Kiểm tra trạng thái pending hợp lệ.
+ * - Kiểm tra trạng thái pending/confirmed hợp lệ.
  * - Kiểm tra tình trạng thanh toán và nghiệp vụ tồn kho.
- * - Cập nhật Order an toàn với điều kiện status=pending để ngăn race condition.
+ * - Hoàn kho nếu đã confirmed; cập nhật Order kèm trạng thái nguồn trong cùng transaction.
  * Thành công trả 200 với { message, data }; mọi lỗi đi qua handleError.
  */
 const cancelOrder = async (req, res) => {

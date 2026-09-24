@@ -1,9 +1,8 @@
 const ROLES = {
   CUSTOMER: "CUSTOMER",
   STAFF: "STAFF",
-  STORAGE: "STORAGE",
   STORAGE_MANAGER: "STORAGE_MANAGER",
   ADMIN: "ADMIN",
-};
+};hãy
 
 module.exports = ROLES;
