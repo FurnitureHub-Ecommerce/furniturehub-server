@@ -45,6 +45,7 @@ const orderPaymentRoute = require("./routes/orderPayment.route");
 const paymentRoute = require("./routes/payment.route");
 const inventoryRoute = require("./routes/inventory.route");
 const reviewRoute = require("./routes/review.route");
+const dashboardRoute = require("./routes/dashboard.route");
 
 // Import hai Router quản lý ProductVariant.
 // File productVariant.route.js đang export hai Router riêng.
@@ -152,6 +153,7 @@ app.use("/api/orders/:orderId/payment", orderPaymentRoute);
 app.use("/api/payments", paymentRoute);
 app.use("/api/inventory", inventoryRoute);
 app.use("/api/reviews", reviewRoute);
+app.use("/api/dashboard", dashboardRoute);
 
 // User: ADMIN tạo tài khoản nhân viên (STAFF hoặc STORAGE_MANAGER).
 app.use("/api/users", userRoute);

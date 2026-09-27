@@ -759,6 +759,7 @@ const definition = {
     { name: "Variant", description: "Quản lý biến thể và SKU" },
     { name: "Wishlist", description: "Quản lý danh sách yêu thích" },
     { name: "Inventory", description: "Quản lý tồn kho một cửa hàng — STORAGE_MANAGER thao tác, ADMIN chỉ xem" },
+    { name: "Dashboard", description: "Thống kê tổng hợp số liệu dành cho quản trị viên (ADMIN)" },
   ],
 };
 
@@ -2222,6 +2223,136 @@ definition.paths = {
 
   Object.assign(definition.components.schemas, schemas);
   Object.assign(definition.paths, paths);
+}
+
+// Cấu hình tài liệu Swagger cho Dashboard Statistics API (Task 4)
+{
+  const ref = (name) => ({ $ref: "#/components/schemas/" + name });
+
+  const dashboardSchemas = {
+    OrdersByStatus: {
+      type: "object",
+      required: [...ORDER_STATUSES],
+      description: "Thống kê số lượng đơn hàng theo từng trạng thái thực tế.",
+      properties: {
+        pending: { type: "integer", minimum: 0, example: 2, description: "Số đơn hàng đang chờ xử lý." },
+        confirmed: { type: "integer", minimum: 0, example: 5, description: "Số đơn hàng đã được xác nhận." },
+        rejected: { type: "integer", minimum: 0, example: 1, description: "Số đơn hàng bị từ chối." },
+        cancelled: { type: "integer", minimum: 0, example: 1, description: "Số đơn hàng bị hủy." },
+      },
+    },
+    DashboardStatistics: {
+      type: "object",
+      required: [
+        "totalUsers",
+        "totalCustomers",
+        "totalProducts",
+        "totalOrders",
+        "totalRevenue",
+        "ordersByStatus",
+      ],
+      description: "Dữ liệu thống kê tổng hợp toàn hệ thống dành cho ADMIN.",
+      properties: {
+        totalUsers: {
+          type: "integer",
+          minimum: 0,
+          example: 6,
+          description: "Tổng số tài khoản người dùng trong hệ thống (bao gồm cả active và inactive).",
+        },
+        totalCustomers: {
+          type: "integer",
+          minimum: 0,
+          example: 2,
+          description: "Tổng số khách hàng (User có role CUSTOMER, bao gồm cả active và inactive).",
+        },
+        totalProducts: {
+          type: "integer",
+          minimum: 0,
+          example: 2,
+          description: "Tổng số sản phẩm đang hoạt động (isActive: true, không tính Variant hay Inventory).",
+        },
+        totalOrders: {
+          type: "integer",
+          minimum: 0,
+          example: 9,
+          description: "Tổng số đơn hàng đã tạo trong hệ thống.",
+        },
+        totalRevenue: {
+          type: "number",
+          minimum: 0,
+          example: 300.3,
+          description: "Tổng doanh thu từ các khoản thanh toán đã hoàn thành (Payment.status = paid) thuộc đơn hàng đã xác nhận (Order.status = confirmed).",
+        },
+        ordersByStatus: ref("OrdersByStatus"),
+      },
+    },
+    DashboardStatisticsResponse: {
+      type: "object",
+      required: ["success", "data"],
+      properties: {
+        success: { type: "boolean", example: true },
+        data: ref("DashboardStatistics"),
+      },
+    },
+    DashboardErrorResponse: {
+      type: "object",
+      required: ["message"],
+      properties: {
+        message: { type: "string", example: "Internal server error" },
+      },
+    },
+  };
+
+  const dashboardPaths = {
+    "/api/dashboard/statistics": {
+      get: {
+        tags: ["Dashboard"],
+        summary: "Lấy dữ liệu thống kê tổng hợp toàn hệ thống",
+        description: "Chỉ dành cho ADMIN. Trả về thống kê tổng hợp bao gồm tổng số người dùng, tổng khách hàng, tổng sản phẩm active, tổng đơn hàng, tổng doanh thu và số lượng đơn hàng theo từng trạng thái.",
+        security: [{ bearerAuth: [] }],
+        responses: {
+          200: {
+            description: "Lấy thống kê thành công.",
+            content: {
+              "application/json": {
+                schema: ref("DashboardStatisticsResponse"),
+              },
+            },
+          },
+          401: {
+            description: "Chưa đăng nhập, thiếu token, token không hợp lệ hoặc token hết hạn.",
+            content: {
+              "application/json": {
+                schema: ref("DashboardErrorResponse"),
+                example: { message: "Unauthorized" },
+              },
+            },
+          },
+          403: {
+            description: "Từ chối truy cập do không phải vai trò ADMIN (CUSTOMER, STAFF, STORAGE_MANAGER).",
+            content: {
+              "application/json": {
+                schema: ref("DashboardErrorResponse"),
+                example: { message: "Forbidden" },
+              },
+            },
+          },
+          500: {
+            description: "Lỗi máy chủ nội bộ hoặc lỗi truy vấn cơ sở dữ liệu.",
+            content: {
+              "application/json": {
+                schema: ref("DashboardErrorResponse"),
+                example: { message: "Internal server error" },
+              },
+            },
+          },
+        },
+      },
+    },
+  };
+
+  Object.assign(definition.components.schemas, dashboardSchemas);
+  Object.assign(definition.paths, dashboardPaths);
 }
 
 // Bước 9: Tạo tài liệu OpenAPI từ cấu hình.
