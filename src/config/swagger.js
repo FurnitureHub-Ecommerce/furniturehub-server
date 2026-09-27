@@ -2023,6 +2023,11 @@ definition.paths = {
     },
   },
 };
+// Ghép schema và endpoint Review vào tài liệu chung.
+const reviewSwagger = require("./review.swagger");
+Object.assign(definition.components.schemas, reviewSwagger.schemas);
+Object.assign(definition.paths, reviewSwagger.paths);
+
 // Bước 9: Tạo tài liệu OpenAPI từ cấu hình.
 const swaggerSpec = swaggerJsdoc({
   definition,
