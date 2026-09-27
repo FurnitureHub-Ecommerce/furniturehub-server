@@ -10,7 +10,7 @@ const addressService = require("./address.service");
 const cartRepository = require("../repositories/cart.repository");
 const checkoutService = require("./checkout.service");
 const inventoryRepository = require("../repositories/inventory.repository");
-const { orderIdSchema } = require("../validators/order.validator");
+const { orderIdSchema, myOrdersQuerySchema } = require("../validators/order.validator");
 const { ORDER_STATUSES, ORDER_STATUS_TRANSITIONS } = require("../constants/orderStatus");
 const Payment = require("../models/Payment.model");
 const ROLES = require("../constants/roles");
@@ -110,6 +110,53 @@ const validateActor = (user, allowedRoles) => {
   if (!user || !mongoose.isObjectIdOrHexString(user.userId)) throw makeError("Unauthorized", 401);
   if (!allowedRoles.includes(user.role)) throw makeError("Forbidden: insufficient permission", 403);
   return user.userId;
+};
+
+/**
+ * Trả danh sách đơn của CUSTOMER; đầu vào là req.user từ JWT và query URL.
+ * Bước 1: Kiểm tra actor và query bằng Zod; không nhận ownership từ query/body.
+ * Bước 2: Luôn lọc userId từ JWT, thêm status nếu được cung cấp.
+ * Bước 3: Đếm và đọc cùng bộ lọc; sort createdAt giảm dần, _id phân định khi trùng giờ.
+ * Bước 4: Phân trang tại database, bỏ __v và giữ snapshot giá/items/địa chỉ đã lưu.
+ * Trả { orders, pagination } theo Product; không có đơn/trang vượt cuối trả mảng rỗng.
+ * Lỗi database chuyển lên Controller để trả 500, không lộ dữ liệu nội bộ.
+ */
+const getMyOrders = async (user, query = {}) => {
+  const userId = validateActor(user, [ROLES.CUSTOMER]);
+  const result = myOrdersQuerySchema.safeParse(query);
+  if (!result.success) {
+    throw makeError(result.error.issues.map((issue) => issue.message).join(", "), 400);
+  }
+  const { page, limit, status } = result.data;
+  const filter = { userId };
+  if (status !== undefined) filter.status = status;
+
+  const [orders, totalItems] = await Promise.all([
+    Order.find(filter).select("-__v").sort({ createdAt: -1, _id: -1 })
+      .skip((page - 1) * limit).limit(limit).lean(),
+    Order.countDocuments(filter),
+  ]);
+  return { orders, pagination: { page, limit, totalItems, totalPages: Math.ceil(totalItems / limit) } };
+};
+
+/**
+ * Đọc trạng thái hiện tại của đơn; đầu vào là actor từ JWT và orderId trên URL.
+ * Bước 1: Chỉ cho CUSTOMER, kiểm tra ObjectId trước truy vấn để tránh CastError.
+ * Bước 2: Đọc đơn theo ID, chỉ lấy trường cần thiết; không tồn tại trả 404.
+ * Bước 3: So sánh userId với JWT; đơn của người khác trả 403 trước khi trả dữ liệu.
+ * Bước 4: Trả orderId, status, createdAt, updatedAt thực tế từ Order.
+ * updatedAt là lần sửa document, không suy diễn thành ngày giao/xác nhận đơn.
+ * Không có Shipment hay timeline trong schema nên không tạo thông tin giả.
+ */
+const getOrderTracking = async (user, orderId) => {
+  const userId = validateActor(user, [ROLES.CUSTOMER]);
+  validateOrderId(orderId);
+  const order = await Order.findById(orderId).select("_id userId status createdAt updatedAt").lean();
+  if (!order) throw makeError("Order not found", 404);
+  if (order.userId.toString().toLowerCase() !== userId.toString().toLowerCase()) {
+    throw makeError("You do not have permission to track this order", 403);
+  }
+  return { orderId: order._id, status: order.status, createdAt: order.createdAt, updatedAt: order.updatedAt };
 };
 
 /**
@@ -288,6 +335,8 @@ const updateOrderStatus = async (orderId, status, user) => {
 };
 
 module.exports = {
+  getMyOrders,
+  getOrderTracking,
   createOrder,
   getOrderById,
   assertOrderStatusTransition,

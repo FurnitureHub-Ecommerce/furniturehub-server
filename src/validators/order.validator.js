@@ -13,6 +13,22 @@ const { ORDER_STATUSES } = require("../constants/orderStatus");
 const createOrderSchema = validateCheckoutSchema;
 const orderIdSchema = z.string().regex(/^[a-fA-F0-9]{24}$/, { message: "Invalid order ID" });
 
+/**
+ * Query danh sách chỉ nhận page, limit và status; cấm userId/customerId hoặc trường lạ.
+ * Nhận chuỗi đơn từ URL, chuyển số và kiểm tra số nguyên dương; không nhận mảng.
+ * Mặc định page=1, limit=10 và tối đa 100 như Product; status dùng enum của Order.
+ * Kiểm tra offset là số nguyên an toàn trước khi dùng skip của MongoDB.
+ * Đầu ra là query đã chuẩn hóa; Service chuyển lỗi Zod thành HTTP 400.
+ */
+const myOrdersQuerySchema = z.object({
+  page: z.string().pipe(z.coerce.number().int().min(1)).default(1),
+  limit: z.string().pipe(z.coerce.number().int().min(1).max(100)).default(10),
+  status: z.enum(ORDER_STATUSES).optional(),
+}).strict().refine(
+  ({ page, limit }) => Number.isSafeInteger((page - 1) * limit),
+  { message: "Pagination offset exceeds the safe integer limit", path: ["page"] }
+);
+
 // Không ép kiểu hay bỏ qua trường lạ: client không được sửa giá, items hoặc chủ đơn.
 const updateOrderStatusSchema = z.object({
   status: z.enum(ORDER_STATUSES),
@@ -35,4 +51,5 @@ module.exports = {
   orderIdSchema,
   updateOrderStatusSchema,
   validateOrderId,
+  myOrdersQuerySchema,
 };

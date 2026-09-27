@@ -46,6 +46,33 @@ const getOrderById = async (req, res) => {
 };
 
 /**
+ * Nhận req.user đã xác thực và query page/limit/status; chuyển sang Order Service.
+ * Service giới hạn ownership và validate query; trả 200 với { orders, pagination }.
+ * Mọi lỗi đi qua handleError theo convention hiện có, không lấy chủ đơn từ client.
+ */
+const getMyOrders = async (req, res) => {
+  try {
+    return res.status(200).json(await orderService.getMyOrders(req.user, req.query));
+  } catch (error) {
+    return handleError(res, error);
+  }
+};
+
+/**
+ * Nhận actor từ JWT và id đã validate trên URL; Service kiểm tra tồn tại/ownership.
+ * Thành công trả 200 { tracking }; sai chủ trả 403, thiếu đơn trả 404 qua handleError.
+ * Chỉ trả trạng thái và timestamps thật; lỗi ngoài dự kiến trả 500 chung.
+ */
+const getOrderTracking = async (req, res) => {
+  try {
+    const tracking = await orderService.getOrderTracking(req.user, req.params.id);
+    return res.status(200).json({ tracking });
+  } catch (error) {
+    return handleError(res, error);
+  }
+};
+
+/**
  * Chuyển ID và status đã validate tới Service sau khi Route kiểm tra STAFF/ADMIN.
  * Confirmed/rejected/cancelled được chuyển sang Service chuyên biệt có xử lý kho.
  * Controller không tự ghi status.
@@ -123,6 +150,8 @@ const cancelOrder = async (req, res) => {
 };
 
 module.exports = {
+  getMyOrders,
+  getOrderTracking,
   createOrder,
   getOrderById,
   updateOrderStatus,
