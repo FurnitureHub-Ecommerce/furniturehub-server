@@ -224,6 +224,39 @@ const definition = {
         type: "object", required: ["order"],
         properties: { order: { $ref: "#/components/schemas/Order" } },
       },
+      // Danh sách đơn dùng metadata giống Product; tracking chỉ có dữ liệu thật của Order.
+      MyOrders: {
+        type: "object", required: ["orders", "pagination"],
+        properties: {
+          orders: { type: "array", items: ref("Order") },
+          pagination: {
+            type: "object", required: ["page", "limit", "totalItems", "totalPages"],
+            properties: {
+              page: { type: "integer", minimum: 1, example: 1 },
+              limit: { type: "integer", minimum: 1, maximum: 100, example: 10 },
+              totalItems: { type: "integer", minimum: 0, example: 1 },
+              totalPages: { type: "integer", minimum: 0, example: 1 },
+            },
+          },
+        },
+      },
+      OrderTracking: {
+        type: "object", required: ["tracking"],
+        properties: {
+          tracking: {
+            type: "object", required: ["orderId", "status", "createdAt", "updatedAt"],
+            properties: {
+              orderId: id,
+              status: { type: "string", enum: ORDER_STATUSES },
+              createdAt: { type: "string", format: "date-time" },
+              updatedAt: {
+                type: "string", format: "date-time",
+                description: "Lần cập nhật document Order; không phải mốc giao hàng hay xác nhận.",
+              },
+            },
+          },
+        },
+      },
       OrderStatusUpdated: {
         type: "object", required: ["message", "order"],
         description: "Kết quả PATCH /status: thông tin trạng thái tối giản sau khi nghiệp vụ kho hoàn tất.",
@@ -1063,6 +1096,65 @@ definition.paths = {
         403: checkoutResponse("Role không phải CUSTOMER", "CheckoutError"),
         404: checkoutResponse("Địa chỉ không tồn tại hoặc không thuộc Customer", "CheckoutError"),
         500: checkoutResponse("Lỗi hệ thống; không trả stack hay dữ liệu nội bộ", "CheckoutError", {
+          serverError: { value: { message: "Internal server error" } },
+        }),
+      },
+    },
+  },
+  // Tracking dành cho CUSTOMER, giữ nguyên các API quản trị Order hiện có.
+  "/api/orders/my-orders": {
+    get: {
+      tags: ["Order"],
+      summary: "CUSTOMER xem danh sách đơn hàng của mình",
+      description:
+        "Yêu cầu JWT và role CUSTOMER. Chủ đơn luôn lấy từ req.user.userId. " +
+        "Chỉ nhận page, limit, status; customerId, userId và query lạ bị từ chối với 400. " +
+        "Sắp xếp createdAt giảm dần, sau đó _id giảm dần khi trùng thời gian. " +
+        "Trả snapshot Order và pagination giống Product. Không có đơn trả 200 với orders=[] và totalItems=totalPages=0. " +
+        "Trang vượt cuối trả orders=[] và giữ tổng số đơn khớp; không trả 404 cho danh sách rỗng.",
+      security: [{ bearerAuth: [] }],
+      parameters: [
+        { name: "page", in: "query", description: "Trang nguyên dương; offset (page-1)*limit phải là số nguyên an toàn.", schema: { type: "integer", minimum: 1, maximum: Number.MAX_SAFE_INTEGER, default: 1 } },
+        { name: "limit", in: "query", description: "Số đơn mỗi trang, tối đa 100 như Product.", schema: { type: "integer", minimum: 1, maximum: 100, default: 10 } },
+        { name: "status", in: "query", description: "Lọc theo enum thực tế của Order, phân biệt hoa/thường.", schema: { type: "string", enum: ORDER_STATUSES } },
+      ],
+      responses: {
+        200: checkoutResponse("Danh sách đơn thuộc Customer và metadata phân trang", "MyOrders"),
+        400: checkoutResponse("page/limit/status không hợp lệ, query lặp hoặc chứa trường lạ", "CheckoutError"),
+        401: checkoutResponse("Thiếu JWT, token không hợp lệ/hết hạn hoặc userId trong token không hợp lệ", "CheckoutError"),
+        403: checkoutResponse("Role không phải CUSTOMER", "CheckoutError"),
+        500: checkoutResponse("Lỗi hệ thống", "CheckoutError", {
+          serverError: { value: { message: "Internal server error" } },
+        }),
+      },
+    },
+  },
+  "/api/orders/{id}/tracking": {
+    get: {
+      tags: ["Order"],
+      summary: "CUSTOMER theo dõi trạng thái đơn hàng của mình",
+      description:
+        "Yêu cầu JWT và role CUSTOMER. Validate ObjectId trước truy vấn (400). " +
+        "Không tồn tại trả 404; tồn tại nhưng userId khác JWT trả 403. " +
+        "Chỉ trả orderId, status, createdAt, updatedAt được lưu trong Order. " +
+        "Chưa có Shipment, trackingNumber hoặc các mốc confirmedAt/shippedAt/deliveredAt/cancelledAt. " +
+        "updatedAt không đại diện một mốc giao hàng; API không suy diễn timeline.",
+      security: [{ bearerAuth: [] }],
+      parameters: [{ name: "id", in: "path", required: true, description: "ObjectId của Order gồm 24 ký tự hex.", schema: id }],
+      responses: {
+        200: checkoutResponse("Trạng thái và timestamps của đơn chính chủ", "OrderTracking"),
+        400: checkoutResponse("Order ID sai định dạng", "CheckoutError", {
+          invalidId: { value: { message: "Invalid order ID" } },
+        }),
+        401: checkoutResponse("Thiếu JWT, token không hợp lệ/hết hạn hoặc userId trong token không hợp lệ", "CheckoutError"),
+        403: checkoutResponse("Role không phải CUSTOMER hoặc Order thuộc Customer khác", "CheckoutError", {
+          forbiddenRole: { value: { message: "Forbidden: insufficient permission" } },
+          differentOwner: { value: { message: "You do not have permission to track this order" } },
+        }),
+        404: checkoutResponse("Order không tồn tại", "CheckoutError", {
+          notFound: { value: { message: "Order not found" } },
+        }),
+        500: checkoutResponse("Lỗi hệ thống", "CheckoutError", {
           serverError: { value: { message: "Internal server error" } },
         }),
       },
