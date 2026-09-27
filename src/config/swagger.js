@@ -528,6 +528,47 @@ const definition = {
         },
       },
 
+      CustomerProfile: {
+        type: "object",
+        additionalProperties: false,
+        required: ["_id", "fullName", "email", "role", "isActive", "createdAt", "updatedAt"],
+        properties: {
+          _id: { type: "string", pattern: "^[a-fA-F0-9]{24}$" },
+          fullName: { type: "string", example: "Nguyễn Văn A" },
+          email: { type: "string", format: "email", readOnly: true },
+          phone: { type: "string", example: "0912345678" },
+          role: { type: "string", enum: ["CUSTOMER"], readOnly: true },
+          isActive: { type: "boolean", readOnly: true },
+          createdAt: { type: "string", format: "date-time", readOnly: true },
+          updatedAt: { type: "string", format: "date-time", readOnly: true },
+        },
+      },
+      UpdateCustomerProfile: {
+        type: "object", minProperties: 1, additionalProperties: false,
+        properties: {
+          fullName: { type: "string", minLength: 2, maxLength: 100, description: "Trim trước khi kiểm tra độ dài; không được chỉ có khoảng trắng." },
+          phone: { type: "string", minLength: 9, maxLength: 15, description: "Trim; dùng giới hạn độ dài giống đăng ký, không thêm regex." },
+        },
+      },
+      CustomerProfileResponse: {
+        type: "object", required: ["user"],
+        properties: { user: { $ref: "#/components/schemas/CustomerProfile" } },
+      },
+      CustomerProfileUpdated: {
+        type: "object", required: ["message", "user"],
+        properties: {
+          message: { type: "string", example: "Profile updated successfully" },
+          user: { $ref: "#/components/schemas/CustomerProfile" },
+        },
+      },
+      CustomerProfileError: {
+        type: "object", required: ["message"],
+        properties: {
+          message: { type: "string" },
+          errors: { type: "array", items: { type: "object", additionalProperties: true }, description: "Chi tiết lỗi Zod nếu validation thất bại." },
+        },
+      },
+
       CreateUserByAdmin: {
         type: "object",
         required: ["fullName", "email", "password", "role"],
@@ -707,7 +748,7 @@ const definition = {
   tags: [
     { name: "Address", description: "Quản lý địa chỉ giao hàng" },
     { name: "Auth", description: "Xác thực người dùng" },
-    { name: "User", description: "Quản lý người dùng — ADMIN tạo tài khoản STAFF và STORAGE_MANAGER" },
+    { name: "User", description: "Hồ sơ CUSTOMER và ADMIN tạo tài khoản STAFF/STORAGE_MANAGER" },
     { name: "Cart", description: "Quản lý giỏ hàng" },
     { name: "Checkout", description: "Kiểm tra điều kiện checkout" },
     { name: "Order", description: "Tạo, xem chi tiết và kiểm soát trạng thái đơn hàng" },
@@ -1522,6 +1563,39 @@ definition.paths = {
   },
 
   // ================= USER =================
+
+  "/api/users/profile": {
+    get: {
+      tags: ["User"], summary: "CUSTOMER xem hồ sơ của mình",
+      security: [{ bearerAuth: [] }],
+      description: "Lấy userId từ JWT; không nhận query hoặc body có field. Chỉ CUSTOMER đang active. " +
+        "Chỉ trả các field công khai; không trả password, token, secret hoặc dữ liệu bảo mật. Địa chỉ dùng /api/addresses riêng.",
+      responses: {
+        200: response("Hồ sơ của Customer đang đăng nhập", "CustomerProfileResponse"),
+        400: response("Query hoặc body không được hỗ trợ", "CustomerProfileError"),
+        401: response("Thiếu JWT, token sai/hết hạn hoặc userId trong token sai định dạng", "CustomerProfileError"),
+        403: response("Role không phải CUSTOMER hoặc tài khoản hiện tại đã inactive/đổi role", "CustomerProfileError"),
+        404: response("User không tồn tại", "CustomerProfileError"),
+        500: response("Lỗi hệ thống; không trả thông tin lỗi nội bộ", "CustomerProfileError"),
+      },
+    },
+    patch: {
+      tags: ["User"], summary: "CUSTOMER cập nhật tên và số điện thoại",
+      security: [{ bearerAuth: [] }],
+      description: "Lấy userId từ JWT, không nhận query. Chỉ fullName/phone được sửa, cần ít nhất một field. " +
+        "Email read-only. Từ chối role, isActive, password, userId, _id, timestamps, Address và mọi field lạ với 400. " +
+        "Tên/phone được trim; response chỉ chứa các field công khai.",
+      requestBody: requestBody("UpdateCustomerProfile"),
+      responses: {
+        200: response("Hồ sơ sau cập nhật", "CustomerProfileUpdated"),
+        400: response("Body rỗng/sai kiểu, dữ liệu không hợp lệ, field bị cấm hoặc query không được hỗ trợ", "CustomerProfileError"),
+        401: response("Thiếu JWT, token sai/hết hạn hoặc userId trong token sai định dạng", "CustomerProfileError"),
+        403: response("Role không phải CUSTOMER hoặc tài khoản hiện tại đã inactive/đổi role", "CustomerProfileError"),
+        404: response("User không tồn tại hoặc không còn thỏa điều kiện cập nhật khi ghi", "CustomerProfileError"),
+        500: response("Lỗi hệ thống; không trả thông tin lỗi nội bộ", "CustomerProfileError"),
+      },
+    },
+  },
 
   "/api/users": {
     post: api({

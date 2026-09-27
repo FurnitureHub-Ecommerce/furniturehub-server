@@ -2,9 +2,10 @@
  * @Author: Minh Truong
  *
  * Mục đích:
- * Controller xử lý các request HTTP liên quan đến quản trị User (User Controller).
+ * Controller xử lý quản trị User và hồ sơ của CUSTOMER đang đăng nhập.
  *
  * Chức năng:
+ * - getProfile/updateProfile: CUSTOMER xem và sửa tên/phone của chính mình.
  * - createUser: ADMIN tạo tài khoản nhân viên (STAFF hoặc STORAGE_MANAGER).
  *   + Nhận dữ liệu đã qua xác thực từ request body.
  *   + Gọi userService.createUser() để xử lý nghiệp vụ tạo tài khoản.
@@ -13,6 +14,33 @@
  */
 
 const userService = require("../services/user.service");
+
+// Lỗi Profile trả JSON theo convention; không gửi lỗi database hoặc stack ra client.
+const handleProfileError = (res, error) => {
+  const statusCode = [400, 401, 403, 404].includes(error.statusCode) ? error.statusCode : 500;
+  return res.status(statusCode).json({
+    message: statusCode === 500 ? "Internal server error" : error.message,
+  });
+};
+
+// Chỉ lấy userId do authMiddleware cung cấp, không đọc ID từ query/body.
+const getProfile = async (req, res) => {
+  try {
+    const user = await userService.getProfile(req.user.userId);
+    return res.status(200).json({ user });
+  } catch (error) {
+    return handleProfileError(res, error);
+  }
+};
+
+const updateProfile = async (req, res) => {
+  try {
+    const user = await userService.updateProfile(req.user.userId, req.body);
+    return res.status(200).json({ message: "Profile updated successfully", user });
+  } catch (error) {
+    return handleProfileError(res, error);
+  }
+};
 
 /**
  * Endpoint xử lý ADMIN tạo tài khoản STAFF hoặc STORAGE_MANAGER.
@@ -52,4 +80,6 @@ const createUser = async (req, res) => {
 
 module.exports = {
   createUser,
+  getProfile,
+  updateProfile,
 };
