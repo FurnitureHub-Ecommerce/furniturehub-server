@@ -59,7 +59,7 @@ const addItemSchema = z.object({
     .min(1, {
       message: "Quantity must be at least 1",
     }),
-});
+}).strict();
 
 /**
  * Bước 3: Schema cập nhật số lượng CartItem.
@@ -84,7 +84,7 @@ const updateItemSchema = z.object({
     .min(1, {
       message: "Quantity must be at least 1",
     }),
-});
+}).strict();
 
 // Bước 4: Export các schema cho Route sử dụng.
 module.exports = {

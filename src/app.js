@@ -60,6 +60,12 @@ const {
   swaggerSpec,
 } = require("./config/swagger");
 
+// Import Middleware xử lý lỗi và route không tồn tại.
+const {
+  notFoundHandler,
+  errorHandler,
+} = require("./middlewares/error.middleware");
+
 // Khởi tạo ứng dụng Express.
 const app = express();
 
@@ -158,17 +164,7 @@ app.use("/api/dashboard", dashboardRoute);
 // User: ADMIN tạo tài khoản nhân viên (STAFF hoặc STORAGE_MANAGER).
 app.use("/api/users", userRoute);
 
-/**
- * Lỗi JSON xảy ra trước Router; trả 400 dạng JSON cho Order, Inventory, User và Review.
- * Không để Express trả trang lỗi chứa stack khi body bị hỏng hoặc là null.
- * Các lỗi khác tiếp tục đi theo cơ chế xử lý hiện tại của ứng dụng.
- */
-app.use(["/api/orders", "/api/inventory", "/api/users", "/api/reviews"], (error, req, res, next) => {
-  if (error.type === "entity.parse.failed") {
-    return res.status(400).json({ message: "Invalid JSON body" });
-  }
-  return next(error);
-});
+
 
 /**
  * ProductVariant.
@@ -208,6 +204,20 @@ app.use(
     },
   })
 );
+
+/**
+ * Middleware xử lý route không tồn tại (Unknown Route / 404 Not Found).
+ * Đặt sau tất cả route API và Swagger để bắt các yêu cầu không khớp route nào.
+ * Trả về HTTP 404 dạng JSON thay vì HTML mặc định của Express.
+ */
+app.use(notFoundHandler);
+
+/**
+ * Middleware xử lý lỗi tập trung toàn ứng dụng (Global Error Handler).
+ * Đặt ở cuối cùng trong pipeline để bắt toàn bộ lỗi phát sinh hoặc gọi next(error).
+ * Chuẩn hóa mã HTTP và JSON response, bảo vệ hệ thống không bị crash và không leak stack trace.
+ */
+app.use(errorHandler);
 
 // Export Express App để server.js sử dụng.
 module.exports = app;

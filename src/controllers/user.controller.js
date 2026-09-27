@@ -68,12 +68,23 @@ const createUser = async (req, res) => {
       },
     });
   } catch (error) {
-    // Xử lý lỗi trả về cho client:
-    // Nếu có statusCode (ví dụ 400 khi trùng email hoặc role không hợp lệ), dùng statusCode đó
-    const statusCode = error.statusCode || 400;
+    // Xử lý lỗi trùng email khi có xung đột ghi đồng thời (MongoServerError 11000)
+    if (error.code === 11000) {
+      return res.status(400).json({
+        message: "Email already exists",
+      });
+    }
 
-    return res.status(statusCode).json({
-      message: error.message,
+    // Nếu có mã statusCode do service ném ra (ví dụ 400 khi role sai hoặc email đã tồn tại)
+    if (error.statusCode && error.statusCode >= 400 && error.statusCode < 500) {
+      return res.status(error.statusCode).json({
+        message: error.message,
+      });
+    }
+
+    // Lỗi hệ thống ngoài dự kiến: trả về HTTP 500 chuẩn hóa, không rò rỉ stack trace
+    return res.status(500).json({
+      message: "Internal server error",
     });
   }
 };
