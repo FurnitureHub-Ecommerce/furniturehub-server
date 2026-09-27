@@ -21,9 +21,28 @@ const userController = require("../controllers/user.controller");
 const authMiddleware = require("../middlewares/auth.middleware");
 const authorizeRoles = require("../middlewares/role.middleware");
 const ROLES = require("../constants/roles");
-const { validateCreateUser } = require("../validators/user.validator");
+const validate = require("../middlewares/validate.middleware");
+const { validateCreateUser, updateProfileSchema, validateProfileRequest } = require("../validators/user.validator");
 
 const router = express.Router();
+
+// Profile của CUSTOMER đăng nhập; phân quyền riêng từng route để giữ quyền ADMIN tạo nhân viên.
+router.get(
+  "/profile",
+  authMiddleware,
+  authorizeRoles(ROLES.CUSTOMER),
+  validateProfileRequest,
+  userController.getProfile
+);
+
+router.patch(
+  "/profile",
+  authMiddleware,
+  authorizeRoles(ROLES.CUSTOMER),
+  validateProfileRequest,
+  validate(updateProfileSchema),
+  userController.updateProfile
+);
 
 /**
  * Route: POST /api/users

@@ -4,6 +4,7 @@
  * Mục đích:
  * Tầng nghiệp vụ (Service Layer) quản lý người dùng FurnitureHub.
  * Cung cấp chức năng cho phép ADMIN tạo tài khoản nhân viên (STAFF, STORAGE_MANAGER).
+ * CUSTOMER được đọc hồ sơ và cập nhật fullName/phone qua các hàm Profile riêng.
  *
  * Các bước xử lý trong hàm createUser:
  * Bước 1: Kiểm tra tính hợp lệ của vai trò (role). Chỉ chấp nhận STAFF hoặc STORAGE_MANAGER.
@@ -17,6 +18,41 @@
 const bcrypt = require("bcryptjs");
 const userRepository = require("../repositories/user.repository");
 const ROLES = require("../constants/roles");
+
+const profileError = (message, statusCode) => Object.assign(new Error(message), { statusCode });
+
+/**
+ * Đọc hồ sơ bằng userId từ JWT và projection an toàn tại Repository.
+ * ID trong token sai trả 401, tài khoản không tồn tại trả 404.
+ * Kiểm tra trạng thái/role hiện tại để token cũ không truy cập sau khi tài khoản bị khóa.
+ * Chỉ áp dụng cho Profile, không thay đổi luồng Auth dùng chung.
+ */
+const getProfile = async (userId) => {
+  if (typeof userId !== "string" || !/^[a-fA-F0-9]{24}$/.test(userId)) {
+    throw profileError("Invalid user ID in token", 401);
+  }
+  const user = await userRepository.findProfileById(userId);
+  if (!user) throw profileError("User not found", 404);
+  if (!user.isActive || user.role !== ROLES.CUSTOMER) {
+    throw profileError("Profile is only available to active customers", 403);
+  }
+  return user;
+};
+
+/**
+ * Kiểm tra tài khoản từ JWT trước khi ghi; chỉ chọn fullName và phone đã qua Zod.
+ * Không truyền nguyên body xuống MongoDB, nên role/email/password/isActive không thể bị sửa.
+ * Trả hồ sơ mới qua projection an toàn; Address được quản lý ở API riêng.
+ */
+const updateProfile = async (userId, data) => {
+  await getProfile(userId);
+  const changes = {};
+  if (data.fullName !== undefined) changes.fullName = data.fullName;
+  if (data.phone !== undefined) changes.phone = data.phone;
+  const user = await userRepository.updateProfileById(userId, changes);
+  if (!user) throw profileError("User is no longer available for profile update", 404);
+  return user;
+};
 
 /**
  * Tạo tài khoản nhân viên bởi ADMIN.
@@ -65,4 +101,6 @@ const createUser = async (userData) => {
 
 module.exports = {
   createUser,
+  getProfile,
+  updateProfile,
 };

@@ -2,7 +2,7 @@
  * @Author: Minh Truong
  *
  * Mục đích:
- * Định nghĩa validator cho User API (dành riêng cho ADMIN tạo tài khoản nhân viên).
+ * Định nghĩa validator cho ADMIN tạo nhân viên và CUSTOMER cập nhật hồ sơ.
  *
  * Nghiệp vụ:
  * - ADMIN chỉ được phép tạo tài khoản có vai trò STAFF hoặc STORAGE_MANAGER.
@@ -82,8 +82,34 @@ const validateCreateUser = (req, res, next) => {
   next();
 };
 
+// Dùng cùng quy tắc tên/phone với tạo tài khoản, nhưng chỉ cho sửa hai trường này.
+const updateProfileSchema = createUserSchema.pick({ fullName: true, phone: true })
+  .partial()
+  .strict()
+  .refine((data) => Object.keys(data).length > 0, "At least one field is required");
+
+/**
+ * Profile chỉ xác định người dùng từ JWT, không nhận query hoặc body của GET.
+ * Từ chối cả userId lẫn trường lạ để không tạo cảm giác client có thể chọn tài khoản.
+ * Body PATCH được kiểm tra riêng bằng updateProfileSchema.
+ */
+const emptyProfileInputSchema = z.object({}).strict();
+const validateProfileRequest = (req, res, next) => {
+  const queryResult = emptyProfileInputSchema.safeParse(req.query);
+  const bodyResult = req.method === "GET"
+    ? emptyProfileInputSchema.optional().safeParse(req.body)
+    : { success: true };
+  const result = !queryResult.success ? queryResult : bodyResult;
+  if (!result.success) {
+    return res.status(400).json({ message: "Validation failed", errors: result.error.issues });
+  }
+  return next();
+};
+
 module.exports = {
   createUserSchema,
   validateCreateUser,
   ALLOWED_ADMIN_CREATED_ROLES,
+  updateProfileSchema,
+  validateProfileRequest,
 };
