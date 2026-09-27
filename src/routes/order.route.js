@@ -64,10 +64,10 @@ router.patch(
 // Giữ nguyên phân quyền các API Customer và Router Payment được gắn sau Router này.
 router.use(authorizeRoles(ROLES.CUSTOMER));
 router.post("/", validate(createOrderSchema), orderController.createOrder);
-// Hai API chỉ dành cho CUSTOMER đã qua JWT; Service luôn kiểm tra quyền sở hữu.
+// Các API chỉ dành cho CUSTOMER đã qua JWT; Service luôn kiểm tra quyền sở hữu.
 // Đặt my-orders trước /:id để tên route không bị hiểu thành ObjectId.
 router.get("/my-orders", orderController.getMyOrders);
 router.get("/:id/tracking", validateOrderId, orderController.getOrderTracking);
-router.get("/:id", orderController.getOrderById);
+router.get("/:id", validateOrderId, orderController.getOrderById);
 
 module.exports = router;

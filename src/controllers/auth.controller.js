@@ -39,9 +39,23 @@ const register = async (req, res) => {
       },
     });
   } catch (error) {
-    const statusCode = error.statusCode || 400;
-    return res.status(statusCode).json({
-      message: error.message,
+    // Xử lý lỗi trùng email khi có xung đột ghi đồng thời (MongoServerError 11000)
+    if (error.code === 11000) {
+      return res.status(400).json({
+        message: "Email already exists",
+      });
+    }
+
+    // Nếu là lỗi nghiệp vụ client đã được định nghĩa statusCode (ví dụ 400 email trùng)
+    if (error.statusCode && error.statusCode >= 400 && error.statusCode < 500) {
+      return res.status(error.statusCode).json({
+        message: error.message,
+      });
+    }
+
+    // Lỗi hệ thống ngoài dự kiến: ẩn thông tin nội bộ và trả về HTTP 500
+    return res.status(500).json({
+      message: "Internal server error",
     });
   }
 };
@@ -68,8 +82,16 @@ const login = async (req, res) => {
       },
     });
   } catch (error) {
-    return res.status(401).json({
-      message: error.message,
+    // Nếu là lỗi xác thực thông tin đăng nhập hoặc tài khoản không hoạt động -> trả HTTP 401
+    if (error.statusCode === 401) {
+      return res.status(401).json({
+        message: error.message,
+      });
+    }
+
+    // Lỗi hệ thống ngoài dự kiến: trả về HTTP 500 chuẩn hóa, không rò rỉ stack trace
+    return res.status(500).json({
+      message: "Internal server error",
     });
   }
 };

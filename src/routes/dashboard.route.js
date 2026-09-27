@@ -20,18 +20,24 @@ const dashboardController = require("../controllers/dashboard.controller");
 const authMiddleware = require("../middlewares/auth.middleware");
 const authorizeRoles = require("../middlewares/role.middleware");
 const ROLES = require("../constants/roles");
+const { validateDashboardQuery } = require("../validators/dashboard.validator");
 
 const router = express.Router();
 
 /**
  * Route lấy dữ liệu thống kê tổng hợp toàn hệ thống:
  * - GET /api/dashboard/statistics
- * - Middleware kiểm tra quyền ADMIN trước khi controller xử lý.
+ * - Thứ tự middleware:
+ *   1. authMiddleware: Xác thực JWT (trả 401 nếu thiếu/hết hạn token).
+ *   2. authorizeRoles(ROLES.ADMIN): Phân quyền chỉ cho phép ADMIN (trả 403 nếu sai role).
+ *   3. validateDashboardQuery: Kiểm tra tính hợp lệ của query parameters và khoảng ngày (trả 400 nếu sai).
+ *   4. dashboardController.getStatistics: Controller tổng hợp và trả số liệu thống kê.
  */
 router.get(
   "/statistics",
   authMiddleware,
   authorizeRoles(ROLES.ADMIN),
+  validateDashboardQuery,
   dashboardController.getStatistics
 );
 

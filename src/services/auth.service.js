@@ -67,18 +67,24 @@ const login = async (email, password) => {
   // Tìm người dùng theo email
   const user = await userRepository.findByEmail(normalizedEmail);
   if (!user) {
-    throw new Error("Invalid email or password");
+    const error = new Error("Invalid email or password");
+    error.statusCode = 401;
+    throw error;
   }
 
   // Kiểm tra tài khoản có bị khóa/vô hiệu hóa không
   if (!user.isActive) {
-    throw new Error("Account is inactive");
+    const error = new Error("Account is inactive");
+    error.statusCode = 401;
+    throw error;
   }
 
   // Đối chiếu mật khẩu đã băm
   const isMatch = await bcrypt.compare(password, user.password);
   if (!isMatch) {
-    throw new Error("Invalid email or password");
+    const error = new Error("Invalid email or password");
+    error.statusCode = 401;
+    throw error;
   }
 
   // Ký JSON Web Token (chứa userId và role)

@@ -2319,6 +2319,15 @@ definition.paths = {
               },
             },
           },
+          400: {
+            description: "Tham số query không hợp lệ (sai định dạng thời gian ISO hoặc from > to).",
+            content: {
+              "application/json": {
+                schema: ref("DashboardErrorResponse"),
+                example: { message: "'from' date must not be later than 'to' date" },
+              },
+            },
+          },
           401: {
             description: "Chưa đăng nhập, thiếu token, token không hợp lệ hoặc token hết hạn.",
             content: {
