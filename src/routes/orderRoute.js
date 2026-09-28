@@ -2,7 +2,7 @@
  * @Author: Minh Truong
  * Mục đích: đăng ký API tạo, xem và kiểm soát trạng thái Order.
  * Bước 1: Xác thực JWT bằng middleware hiện tại (401).
- * Bước 2: POST/GET giữ quyền CUSTOMER; PATCH status/confirm/reject chỉ STAFF/ADMIN (403).
+ * Bước 2: GET / dành cho STAFF/ADMIN; POST và GET đơn cá nhân giữ quyền CUSTOMER.
  * CUSTOMER được hủy đơn của mình qua PATCH cancel theo quyền sẵn có.
  * Bước 3: PATCH kiểm tra ID trước body bằng Zod (400), rồi gọi Controller.
  * Bước 4: Service kiểm tra tồn tại (404), thiếu hàng (400), quy tắc (409), transaction (503).
@@ -21,6 +21,9 @@ const {
 
 const router = express.Router();
 router.use(authMiddleware);
+
+// Danh sách toàn bộ đơn phải được đăng ký trước middleware chỉ cho CUSTOMER.
+router.get("/", authorizeRoles(ROLES.STAFF, ROLES.ADMIN), orderController.getAllOrder);
 
 // Đăng ký trước nhóm CUSTOMER để STAFF/ADMIN truy cập đúng API quản trị.
 // Không mở quyền hủy của Customer; quyền đó thuộc API riêng trong Task 3.

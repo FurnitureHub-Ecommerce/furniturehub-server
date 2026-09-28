@@ -58,6 +58,15 @@ const getMyOrders = async (req, res) => {
   }
 };
 
+// STAFF/ADMIN xem đơn của tất cả khách hàng, có phân trang và lọc trạng thái.
+const getAllOrder = async (req, res) => {
+  try {
+    return res.status(200).json(await orderService.getAllOrder(req.user, req.query));
+  } catch (error) {
+    return handleError(res, error);
+  }
+};
+
 /**
  * Nhận actor từ JWT và id đã validate trên URL; Service kiểm tra tồn tại/ownership.
  * Thành công trả 200 { tracking }; sai chủ trả 403, thiếu đơn trả 404 qua handleError.
@@ -150,6 +159,7 @@ const cancelOrder = async (req, res) => {
 };
 
 module.exports = {
+  getAllOrder,
   getMyOrders,
   getOrderTracking,
   createOrder,

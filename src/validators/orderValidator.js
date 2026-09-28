@@ -20,7 +20,7 @@ const orderIdSchema = z.string().regex(/^[a-fA-F0-9]{24}$/, { message: "Invalid 
  * Kiểm tra offset là số nguyên an toàn trước khi dùng skip của MongoDB.
  * Đầu ra là query đã chuẩn hóa; Service chuyển lỗi Zod thành HTTP 400.
  */
-const myOrdersQuerySchema = z.object({
+const ordersQuerySchema = z.object({
   page: z.string().pipe(z.coerce.number().int().min(1)).default(1),
   limit: z.string().pipe(z.coerce.number().int().min(1).max(100)).default(10),
   status: z.enum(ORDER_STATUSES).optional(),
@@ -51,5 +51,6 @@ module.exports = {
   orderIdSchema,
   updateOrderStatusSchema,
   validateOrderId,
-  myOrdersQuerySchema,
+  ordersQuerySchema,
+  myOrdersQuerySchema: ordersQuerySchema,
 };
