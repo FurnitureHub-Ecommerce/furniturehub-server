@@ -1113,6 +1113,28 @@ definition.paths = {
   },
   // Tạo Order dành cho Customer và lưu toàn bộ snapshot trong một document.
   "/api/orders": {
+    get: {
+      tags: ["Order"],
+      summary: "STAFF/ADMIN xem tất cả đơn hàng",
+      description:
+        "Yêu cầu JWT và role STAFF hoặc ADMIN. Xem đơn của tất cả khách hàng, không giới hạn theo userId. " +
+        "Chỉ nhận page, limit, status; query lạ bị từ chối với 400. " +
+        "Sắp xếp createdAt giảm dần, sau đó _id giảm dần. Trả snapshot đầy đủ và metadata phân trang. " +
+        "Không có đơn hoặc trang vượt cuối trả orders=[] với HTTP 200.",
+      security: [{ bearerAuth: [] }],
+      parameters: [
+        { name: "page", in: "query", description: "Offset (page-1)*limit phải là số nguyên an toàn.", schema: { type: "integer", minimum: 1, maximum: Number.MAX_SAFE_INTEGER, default: 1 } },
+        { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 100, default: 10 } },
+        { name: "status", in: "query", schema: { type: "string", enum: ORDER_STATUSES } },
+      ],
+      responses: {
+        200: checkoutResponse("Danh sách đơn của tất cả khách hàng và metadata phân trang", "MyOrders"),
+        400: checkoutResponse("page/limit/status không hợp lệ hoặc query chứa trường lạ", "CheckoutError"),
+        401: checkoutResponse("Thiếu JWT, token hoặc userId trong token không hợp lệ", "CheckoutError"),
+        403: checkoutResponse("Chỉ STAFF và ADMIN được xem tất cả đơn hàng", "CheckoutError"),
+        500: checkoutResponse("Lỗi hệ thống", "CheckoutError"),
+      },
+    },
     post: {
       tags: ["Order"],
       summary: "Customer tạo đơn từ Cart hiện tại",

@@ -10,7 +10,7 @@ const addressService = require("./addressService");
 const cartRepository = require("../repositories/cartRepository");
 const checkoutService = require("./checkoutService");
 const inventoryRepository = require("../repositories/inventoryRepository");
-const { orderIdSchema, myOrdersQuerySchema } = require("../validators/orderValidator");
+const { orderIdSchema, ordersQuerySchema } = require("../validators/orderValidator");
 const { ORDER_STATUSES, ORDER_STATUS_TRANSITIONS } = require("../constants/orderStatus");
 const Payment = require("../models/paymentModel");
 const ROLES = require("../constants/roles");
@@ -123,12 +123,21 @@ const validateActor = (user, allowedRoles) => {
  */
 const getMyOrders = async (user, query = {}) => {
   const userId = validateActor(user, [ROLES.CUSTOMER]);
-  const result = myOrdersQuerySchema.safeParse(query);
+  return listOrders({ userId }, query);
+};
+
+// Kiểm tra quyền cả khi gọi service trực tiếp; không giới hạn theo chủ đơn.
+const getAllOrder = async (user, query = {}) => {
+  validateActor(user, [ROLES.STAFF, ROLES.ADMIN]);
+  return listOrders({}, query);
+};
+
+const listOrders = async (filter, query) => {
+  const result = ordersQuerySchema.safeParse(query);
   if (!result.success) {
     throw makeError(result.error.issues.map((issue) => issue.message).join(", "), 400);
   }
   const { page, limit, status } = result.data;
-  const filter = { userId };
   if (status !== undefined) filter.status = status;
 
   const [orders, totalItems] = await Promise.all([
@@ -335,6 +344,7 @@ const updateOrderStatus = async (orderId, status, user) => {
 };
 
 module.exports = {
+  getAllOrder,
   getMyOrders,
   getOrderTracking,
   createOrder,
