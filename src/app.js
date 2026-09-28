@@ -17,42 +17,42 @@ const express = require("express");
 const cors = require("cors");
 
 // Import các Router hiện tại của FurnitureHub.
-const categoryRoute = require("./routes/category.route");
-const authRoute = require("./routes/auth.route");
-const userRoute = require("./routes/user.route");
-const brandRoute = require("./routes/brand.route");
-const productRoute = require("./routes/product.route");
+const categoryRoute = require("./routes/categoryRoute");
+const authRoute = require("./routes/authRoute");
+const userRoute = require("./routes/userRoute");
+const brandRoute = require("./routes/brandRoute");
+const productRoute = require("./routes/productRoute");
 
 // Import Router quản lý Wishlist.
-const wishlistRoute = require("./routes/wishlist.route");
+const wishlistRoute = require("./routes/wishlistRoute");
 
 // Import Router quản lý Cart.
-const cartRoute = require("./routes/cart.route");
+const cartRoute = require("./routes/cartRoute");
 
 // Import Router quản lý Address.
-const addressRoute = require("./routes/address.route");
+const addressRoute = require("./routes/addressRoute");
 
 // Import Router kiểm tra điều kiện checkout.
-const checkoutRoute = require("./routes/checkout.route");
+const checkoutRoute = require("./routes/checkoutRoute");
 
 // Tạo và xem chi tiết đơn hàng của Customer.
-const orderRoute = require("./routes/order.route");
+const orderRoute = require("./routes/orderRoute");
 
 // Payment: Customer tạo và xem Payment theo orderId.
-const orderPaymentRoute = require("./routes/orderPayment.route");
+const orderPaymentRoute = require("./routes/orderPaymentRoute");
 
 // Payment: STAFF/ADMIN xác nhận trạng thái Payment.
-const paymentRoute = require("./routes/payment.route");
-const inventoryRoute = require("./routes/inventory.route");
-const reviewRoute = require("./routes/review.route");
-const dashboardRoute = require("./routes/dashboard.route");
+const paymentRoute = require("./routes/paymentRoute");
+const inventoryRoute = require("./routes/inventoryRoute");
+const reviewRoute = require("./routes/reviewRoute");
+const dashboardRoute = require("./routes/dashboardRoute");
 
 // Import hai Router quản lý ProductVariant.
-// File productVariant.route.js đang export hai Router riêng.
+// File productVariantRoute.js đang export hai Router riêng.
 const {
   productVariantRouter,
   variantRouter,
-} = require("./routes/productVariant.route");
+} = require("./routes/productVariantRoute");
 
 // Import Swagger UI và tài liệu OpenAPI.
 const {
@@ -64,7 +64,7 @@ const {
 const {
   notFoundHandler,
   errorHandler,
-} = require("./middlewares/error.middleware");
+} = require("./middlewares/errorMiddleware");
 
 // Khởi tạo ứng dụng Express.
 const app = express();
@@ -173,7 +173,7 @@ app.use("/api/users", userRoute);
  * Router thứ hai xử lý từng biến thể theo ID.
  *
  * Các tiền tố này áp dụng khi đường dẫn bên trong
- * productVariant.route.js là các đường dẫn tương đối.
+ * productVariantRoute.js là các đường dẫn tương đối.
  */
 app.use(
   "/api/products/:productId/variants",
