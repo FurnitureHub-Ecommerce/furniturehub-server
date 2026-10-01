@@ -15,6 +15,15 @@
 
 const userService = require("../services/userService");
 
+const getAllUsers = async (req, res) => {
+  try {
+    const users = await userService.getAllUsers();
+    return res.status(200).json({ users });
+  } catch (error) {
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
 // Lỗi Profile trả JSON theo convention; không gửi lỗi database hoặc stack ra client.
 const handleProfileError = (res, error) => {
   const statusCode = [400, 401, 403, 404].includes(error.statusCode) ? error.statusCode : 500;
@@ -90,6 +99,7 @@ const createUser = async (req, res) => {
 };
 
 module.exports = {
+  getAllUsers,
   createUser,
   getProfile,
   updateProfile,

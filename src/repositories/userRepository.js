@@ -17,6 +17,11 @@ const ROLES = require("../constants/roles");
 // Chọn danh sách field được công khai; không đọc password hay dữ liệu bảo mật vào Profile.
 const PROFILE_FIELDS = "_id fullName email phone role isActive createdAt updatedAt";
 
+const findAll = () => User.find({})
+  .select(PROFILE_FIELDS)
+  .sort({ createdAt: -1, _id: -1 })
+  .lean();
+
 const findProfileById = (id) => User.findById(id).select(PROFILE_FIELDS).lean();
 
 // Điều kiện ghi giữ đúng tài khoản CUSTOMER active, kể cả khi tài khoản vừa bị khóa/đổi role.
@@ -54,6 +59,7 @@ const createUser = async (userData) => {
 };
 
 module.exports = {
+  findAll,
   findByEmail,
   findById,
   createUser,

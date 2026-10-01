@@ -19,6 +19,8 @@ const bcrypt = require("bcryptjs");
 const userRepository = require("../repositories/userRepository");
 const ROLES = require("../constants/roles");
 
+const getAllUsers = () => userRepository.findAll();
+
 const profileError = (message, statusCode) => Object.assign(new Error(message), { statusCode });
 
 /**
@@ -100,6 +102,7 @@ const createUser = async (userData) => {
 };
 
 module.exports = {
+  getAllUsers,
   createUser,
   getProfile,
   updateProfile,
