@@ -1621,6 +1621,46 @@ definition.paths = {
   },
 
   "/api/users": {
+    get: {
+      tags: ["User"],
+      summary: "ADMIN lấy toàn bộ danh sách người dùng",
+      security: [{ bearerAuth: [] }],
+      description: "Trả tất cả vai trò, bao gồm tài khoản bị vô hiệu hóa. Không phân trang; sắp xếp createdAt và _id giảm dần. Không trả password.",
+      responses: {
+        200: {
+          description: "Danh sách người dùng; users là mảng rỗng nếu chưa có tài khoản",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["users"],
+                properties: {
+                  users: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        _id: id,
+                        fullName: { type: "string" },
+                        email: { type: "string", format: "email" },
+                        phone: { type: "string" },
+                        role: { type: "string", enum: ["CUSTOMER", "STAFF", "STORAGE_MANAGER", "ADMIN"] },
+                        isActive: { type: "boolean" },
+                        createdAt: { type: "string", format: "date-time" },
+                        updatedAt: { type: "string", format: "date-time" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        401: response("Thiếu JWT hoặc token không hợp lệ/hết hạn", "CustomerProfileError"),
+        403: response("Chỉ ADMIN được truy cập", "CustomerProfileError"),
+        500: response("Lỗi hệ thống", "CustomerProfileError"),
+      },
+    },
     post: api({
       tag: "User",
       summary: "ADMIN tạo tài khoản STAFF hoặc STORAGE_MANAGER",

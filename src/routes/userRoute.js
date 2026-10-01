@@ -26,6 +26,13 @@ const { validateCreateUser, updateProfileSchema, validateProfileRequest } = requ
 
 const router = express.Router();
 
+router.get(
+  "/",
+  authMiddleware,
+  authorizeRoles(ROLES.ADMIN),
+  userController.getAllUsers
+);
+
 // Profile của CUSTOMER đăng nhập; phân quyền riêng từng route để giữ quyền ADMIN tạo nhân viên.
 router.get(
   "/profile",
