@@ -66,10 +66,10 @@ const validateId = (id) => {
  * - Kiểm tra productId hợp lệ.
  * - Tìm Product trong MongoDB.
  * - Nếu Product không tồn tại, trả lỗi 404.
- * - Nếu Product không hoạt động, trả lỗi 400.
+ * - Nếu yêu cầu trạng thái active mà Product không hoạt động, trả lỗi 400.
  * - Trả về Product hợp lệ.
  */
-const validateProduct = async (productId) => {
+const validateProduct = async (productId, requireActive = true) => {
   validateId(productId);
 
   const product = await productRepository.findById(productId);
@@ -78,7 +78,7 @@ const validateProduct = async (productId) => {
     throw makeError("Product not found", 404);
   }
 
-  if (!product.isActive) {
+  if (requireActive && !product.isActive) {
     throw makeError("Product is inactive", 400);
   }
 
@@ -272,7 +272,7 @@ const create = async (productId, data) => {
  * - Kiểm tra Variant ID.
  * - Tìm Variant trong MongoDB.
  * - Nếu không tồn tại, trả lỗi 404.
- * - Kiểm tra Product đang hoạt động.
+ * - Product phải hoạt động, trừ khi chỉ cập nhật trạng thái riêng của Variant.
  * - Chỉ lấy các trường được phép cập nhật.
  * - Nếu cập nhật SKU, kiểm tra SKU trùng.
  * - Gộp dữ liệu cũ và mới.
@@ -292,7 +292,11 @@ const update = async (id, data) => {
     throw makeError("Variant not found", 404);
   }
 
-  await validateProduct(variant.productId.toString());
+  // Trạng thái riêng của Variant độc lập với trạng thái Product cha.
+  // Cập nhật thuộc tính khác vẫn yêu cầu Product hoạt động như trước.
+  const statusOnly = typeof data.isActive === "boolean" &&
+    Object.keys(data).every((field) => field === "isActive");
+  await validateProduct(variant.productId.toString(), !statusOnly);
 
   // Danh sách những trường Admin được phép sửa.
   const allowedFields = [

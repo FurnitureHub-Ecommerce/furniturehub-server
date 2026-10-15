@@ -1809,7 +1809,7 @@ definition.paths = {
       body: requestBody("Product", true, {
         isActive: { type: "boolean" },
       }),
-      description: "Có thể cập nhật isActive để kích hoạt lại Product.",
+      description: "Có thể cập nhật isActive để kích hoạt lại Product. Không thay đổi isActive riêng của các Variant.",
     }),
 
     delete: api({
@@ -1817,6 +1817,7 @@ definition.paths = {
       summary: "Admin vô hiệu hóa Product",
       secured: true,
       params: [idParam()],
+      description: "Chỉ vô hiệu hóa Product; giữ nguyên isActive của từng Variant. Variant chỉ được mua khi cả Product và Variant đều active.",
     }),
   },
 
@@ -1861,6 +1862,7 @@ definition.paths = {
       summary: "Admin cập nhật Variant và SKU",
       secured: true,
       params: [idParam()],
+      description: "Cho phép chỉ cập nhật isActive khi Product cha inactive. Cập nhật thuộc tính khác vẫn yêu cầu Product active. Bật Variant không tự bật Product.",
       body: requestBody("Variant", true, {
         isActive: { type: "boolean" },
       }),
@@ -2024,7 +2026,7 @@ definition.paths = {
       description:
         "Cập nhật quantity của một item trong giỏ hàng. " +
         "itemId là _id của CartItem lấy từ GET /api/cart. " +
-        "Kiểm tra tồn kho với quantity mới.",
+        "Product và Variant phải cùng active; thiếu hoặc inactive trả 404. Kiểm tra tồn kho với quantity mới.",
       body: {
         required: true,
         content: {

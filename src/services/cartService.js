@@ -311,7 +311,7 @@ const getCart = async (userId) => {
  * 3. Kiểm tra Cart tồn tại.
  * 4. Tìm CartItem theo itemId trong mảng items.
  * 5. Kiểm tra CartItem tồn tại.
- * 6. Lấy tồn kho hiện tại của Variant.
+ * 6. Kiểm tra Variant và Product còn hoạt động, rồi lấy tồn kho.
  * 7. Kiểm tra quantity mới không vượt tồn kho.
  * 8. Cập nhật quantity.
  * 9. Lưu Cart và trả về dữ liệu đầy đủ.
@@ -320,6 +320,7 @@ const getCart = async (userId) => {
  * - itemId không hợp lệ: 400.
  * - Cart không tồn tại: 404.
  * - CartItem không tồn tại: 404.
+ * - Variant hoặc Product không tồn tại/đã ngừng hoạt động: 404.
  * - Tồn kho không đủ: 400.
  *
  * Lưu ý:
@@ -347,7 +348,18 @@ const updateItem = async (userId, itemId, quantity) => {
     throw makeError("Cart item not found", 404);
   }
 
-  // Bước 6: Lấy tồn kho hiện tại của Variant.
+  // Bước 6: Kiểm tra lại trạng thái vì hàng có thể bị tắt sau khi thêm vào giỏ.
+  const variant = await variantRepository.findById(item.variantId.toString());
+  if (!variant || variant.isActive !== true) {
+    throw makeError("Product variant not found", 404);
+  }
+
+  const product = await productRepository.findById(variant.productId.toString());
+  if (!product || product.isActive !== true) {
+    throw makeError("Product not found", 404);
+  }
+
+  // Trạng thái hợp lệ mới tiếp tục kiểm tra tồn kho và cập nhật số lượng.
   const inventory = await cartRepository.findInventoryByVariantId(
     item.variantId.toString()
   );
