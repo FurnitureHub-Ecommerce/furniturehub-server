@@ -12,10 +12,10 @@
  * 3. totalProducts: Chỉ đếm các sản phẩm (Product) đang hoạt động (isActive: true). Không đếm biến thể (ProductVariant)
  *    hay bản ghi tồn kho (Inventory).
  * 4. totalOrders: Đếm tổng số document đơn hàng (Order) trong database, không đếm subdocuments items hay số lượng sản phẩm.
- * 5. ordersByStatus: Thống kê số lượng đơn hàng theo từng trạng thái trong enum quy định (pending, confirmed, rejected, cancelled).
+ * 5. ordersByStatus: Thống kê số lượng đơn hàng theo đủ sáu trạng thái trong enum dùng chung.
  *    Nếu một trạng thái không có đơn hàng nào, giá trị trả về vẫn phải là 0, không được bỏ qua key.
  * 6. totalRevenue: Doanh thu thực tế được tính từ các khoản thanh toán đã hoàn thành (Payment.status = "paid")
- *    thuộc về các đơn hàng đã được xác nhận (Order.status = "confirmed").
+ *    thuộc về các đơn hàng đã xác nhận, đang giao hoặc đã giao (confirmed/shipping/delivered).
  *    - Không tính các Payment đang chờ (pending), thất bại (failed), hoặc bị hủy (cancelled).
  *    - Không tính các Payment dù đã "paid" nhưng Order bị hủy (cancelled) hoặc từ chối (rejected).
  *    - Không tính các Payment mồ côi (orphan Payment: orderId không trỏ tới Order nào tồn tại).
@@ -78,9 +78,9 @@ const getStatistics = async () => {
 
     // 6. Tính tổng doanh thu:
     // - Chỉ lấy Payment có status là "paid".
-    // - Lookup sang collection "orders" để kiểm tra đơn hàng tương ứng có tồn tại và trạng thái là "confirmed".
+    // - Lookup sang collection "orders" để kiểm tra đơn hàng tương ứng có tồn tại.
     // - Unwind kết quả lookup; nếu đơn hàng không tồn tại (orphan payment) thì pipeline sẽ loại bỏ.
-    // - Match kiểm tra order.status === "confirmed".
+    // - Giữ doanh thu đã thanh toán khi đơn chuyển từ confirmed sang shipping/delivered.
     // - Group tính tổng trường amount (snapshot số tiền thanh toán thực tế).
     Payment.aggregate([
       {
@@ -101,7 +101,7 @@ const getStatistics = async () => {
       },
       {
         $match: {
-          "order.status": "confirmed",
+          "order.status": { $in: ["confirmed", "shipping", "delivered"] },
         },
       },
       {

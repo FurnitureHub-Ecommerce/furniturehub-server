@@ -196,7 +196,7 @@ Không có tài khoản admin mặc định hoặc API đăng ký admin công kh
 | --- | --- | --- |
 | Auth | `POST /api/auth/register`, `POST /api/auth/login` | Đăng ký, đăng nhập |
 | User | `GET /api/users`, `POST /api/users` | Admin xem toàn bộ user, tạo nhân viên |
-| Profile | `GET /api/users/profile`, `PATCH /api/users/profile` | Customer xem/sửa tên và số điện thoại |
+| Profile | `GET /api/users/profile`, `PATCH /api/users/profile` | Customer/Staff/Storage manager xem hồ sơ chính chủ; chỉ Customer sửa tên và số điện thoại |
 | Catalog | `/api/categories`, `/api/brands`, `/api/products` | Danh mục, thương hiệu, sản phẩm |
 | Variant | `/api/products/:productId/variants`, `/api/variants/:id` | Biến thể sản phẩm |
 | Wishlist | `/api/wishlist` | Sản phẩm yêu thích |
@@ -224,7 +224,7 @@ Database mới chưa có dữ liệu mẫu. Thực hiện theo thứ tự sau, d
 6. **Staff/admin:** xác nhận đơn qua `PATCH /api/orders/:id/confirm`. Khi đã kiểm tra việc nhận tiền thực tế, cập nhật payment qua `PATCH /api/payments/:paymentId/status` với `{ "status": "paid" }`.
 7. **Customer:** xem `GET /api/orders/my-orders` hoặc `GET /api/orders/:id/tracking`.
 
-Trạng thái đơn hiện có: `pending`, `confirmed`, `rejected`, `cancelled`. API tạo payment hiện chỉ chấp nhận đơn `pending`, vì vậy tạo payment trước khi xác nhận đơn. Xác nhận payment không tự đổi trạng thái đơn. MoMo và xác nhận chuyển khoản tự động chưa được tích hợp.
+Trạng thái đơn hiện có: `pending`, `confirmed`, `shipping`, `delivered`, `rejected`, `cancelled`. Staff/admin dùng `PATCH /api/orders/:id/status` với `{ "status": "shipping" }`, sau đó `{ "status": "delivered" }` theo luồng `confirmed → shipping → delivered`. Giữ các nhánh `pending/confirmed → rejected/cancelled`; không hủy/từ chối khi đã shipping/delivered. Chuyển trạng thái lặp hoặc sai luồng trả 409. API tạo payment hiện chỉ chấp nhận đơn `pending`, vì vậy tạo payment trước khi xác nhận đơn. Xác nhận payment không tự đổi trạng thái đơn. MoMo và xác nhận chuyển khoản tự động chưa được tích hợp.
 
 ### 8. Cấu trúc và lệnh thường dùng
 
@@ -469,7 +469,7 @@ Paths below are relative to `http://localhost:5000`. Swagger contains full reque
 | --- | --- | --- |
 | Auth | `POST /api/auth/register`, `POST /api/auth/login` | Registration and login |
 | User | `GET /api/users`, `POST /api/users` | Admin user list and employee creation |
-| Profile | `GET /api/users/profile`, `PATCH /api/users/profile` | Customer profile, name and phone updates |
+| Profile | `GET /api/users/profile`, `PATCH /api/users/profile` | Customer/staff/storage manager own profile; only customers update name and phone |
 | Catalog | `/api/categories`, `/api/brands`, `/api/products` | Categories, brands and products |
 | Variant | `/api/products/:productId/variants`, `/api/variants/:id` | Product variants |
 | Wishlist | `/api/wishlist` | Favorite products |
@@ -497,7 +497,7 @@ A new database has no sample data. Follow this sequence using the Swagger exampl
 6. **Staff/admin:** confirm the order with `PATCH /api/orders/:id/confirm`. After verifying that payment was actually received, call `PATCH /api/payments/:paymentId/status` with `{ "status": "paid" }`.
 7. **Customer:** view `GET /api/orders/my-orders` or `GET /api/orders/:id/tracking`.
 
-Current order statuses are `pending`, `confirmed`, `rejected` and `cancelled`. Payment creation currently requires a `pending` order, so create the payment before confirming the order. Confirming payment does not automatically change the order status. MoMo and automatic bank transfer verification are not integrated.
+Current order statuses are `pending`, `confirmed`, `shipping`, `delivered`, `rejected` and `cancelled`. Staff/admin use `PATCH /api/orders/:id/status` with `{ "status": "shipping" }`, then `{ "status": "delivered" }` for `confirmed → shipping → delivered`. Existing `pending/confirmed → rejected/cancelled` transitions remain; shipping/delivered orders cannot be cancelled or rejected. Repeated or invalid transitions return 409. Payment creation currently requires a `pending` order, so create the payment before confirming the order. Confirming payment does not automatically change the order status. MoMo and automatic bank transfer verification are not integrated.
 
 ### 8. Structure and Commands
 

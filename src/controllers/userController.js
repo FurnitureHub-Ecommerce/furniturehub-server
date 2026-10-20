@@ -2,10 +2,11 @@
  * @Author: Minh Truong
  *
  * Mục đích:
- * Controller xử lý quản trị User và hồ sơ của CUSTOMER đang đăng nhập.
+ * Controller xử lý quản trị User và hồ sơ chính chủ từ JWT đã xác thực.
  *
  * Chức năng:
- * - getProfile/updateProfile: CUSTOMER xem và sửa tên/phone của chính mình.
+ * - getProfile: CUSTOMER/STAFF/STORAGE_MANAGER xem hồ sơ của mình.
+ * - updateProfile: chỉ CUSTOMER sửa tên/phone của chính mình.
  * - createUser: ADMIN tạo tài khoản nhân viên (STAFF hoặc STORAGE_MANAGER).
  *   + Nhận dữ liệu đã qua xác thực từ request body.
  *   + Gọi userService.createUser() để xử lý nghiệp vụ tạo tài khoản.

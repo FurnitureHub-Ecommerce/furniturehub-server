@@ -46,7 +46,7 @@ const orderSchema = new mongoose.Schema({
     },
   },
   // Enum chỉ kiểm tra giá trị lưu; quy tắc chuyển và nghiệp vụ do Order Service kiểm tra.
-  // Đơn mới vẫn là pending; thêm cancelled để chuẩn bị quy tắc hủy của Task 3.
+  // Đơn mới vẫn là pending; enum dùng chung hỗ trợ cả vận chuyển và giao thành công.
   status: { type: String, enum: ORDER_STATUSES, default: "pending", required: true },
   subtotal: { type: Number, required: true, min: 0, max: Number.MAX_SAFE_INTEGER, validate: Number.isFinite, immutable: true },
   totalAmount: { type: Number, required: true, min: 0, max: Number.MAX_SAFE_INTEGER, validate: Number.isFinite, immutable: true },

@@ -170,6 +170,7 @@ const getOrderTracking = async (user, orderId) => {
 
 /**
  * Đơn pending được xác nhận/từ chối/hủy; đơn confirmed được từ chối/hủy và hoàn kho.
+ * Luồng giao hàng chỉ đi confirmed → shipping → delivered, không mở lại đơn kết thúc.
  * Chặn trạng thái lặp hoặc chuyển ngược để không trừ/hoàn kho thêm lần nữa.
  */
 const assertOrderStatusTransition = (currentStatus, nextStatus) => {
@@ -328,7 +329,7 @@ const rejectOrder = (orderId, user) => finishOrder(orderId, "rejected", user);
 const cancelOrder = (orderId, user) => finishOrder(orderId, "cancelled", user);
 
 /**
- * API đổi trạng thái luôn đi qua nghiệp vụ xác nhận/từ chối/hủy tương ứng.
+ * API đổi trạng thái đi qua nghiệp vụ xác nhận/từ chối/hủy hoặc giao hàng tương ứng.
  * Không có đường cập nhật trực tiếp để bỏ qua kiểm tra kho, lịch sử hoặc quyền.
  */
 const updateOrderStatus = async (orderId, status, user) => {
@@ -338,6 +339,15 @@ const updateOrderStatus = async (orderId, status, user) => {
   if (status === "confirmed") return confirmOrder(orderId, user);
   if (status === "rejected") return rejectOrder(orderId, user);
   if (status === "cancelled") return cancelOrder(orderId, user);
+  if (status === "shipping" || status === "delivered") {
+    // Kho đã trừ khi confirmed; giao hàng chỉ đổi trạng thái, không ghi kho hay Payment.
+    // Đọc và ghi trong transaction, kèm trạng thái nguồn để chặn ghi đè yêu cầu đồng thời.
+    return withTransaction(async (session) => {
+      const order = await findOrder(orderId, session);
+      assertOrderStatusTransition(order.status, status);
+      return setOrderStatus(orderId, order.status, status, session);
+    });
+  }
   const order = await Order.findById(orderId).select("_id status").lean();
   if (!order) throw makeError("Order not found", 404);
   assertOrderStatusTransition(order.status, status);

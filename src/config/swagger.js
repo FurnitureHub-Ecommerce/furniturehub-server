@@ -203,7 +203,7 @@ const definition = {
           _id: { type: "string" }, userId: { type: "string" },
           status: {
             type: "string", enum: ORDER_STATUSES, default: "pending",
-            description: "Đơn mới pending; confirmed trừ kho, rejected/cancelled hoàn kho nếu đơn đã confirmed.",
+            description: "Đơn mới pending; confirmed trừ kho; shipping → delivered không đổi kho. rejected/cancelled hoàn kho nếu nguồn là confirmed.",
           },
           shippingAddress: { $ref: "#/components/schemas/OrderShippingAddress" },
           items: { type: "array", minItems: 1, items: { $ref: "#/components/schemas/OrderItem" } },
@@ -537,7 +537,7 @@ const definition = {
           fullName: { type: "string", example: "Nguyễn Văn A" },
           email: { type: "string", format: "email", readOnly: true },
           phone: { type: "string", example: "0912345678" },
-          role: { type: "string", enum: ["CUSTOMER"], readOnly: true },
+          role: { type: "string", enum: ["CUSTOMER", "STAFF", "STORAGE_MANAGER"], readOnly: true },
           isActive: { type: "boolean", readOnly: true },
           createdAt: { type: "string", format: "date-time", readOnly: true },
           updatedAt: { type: "string", format: "date-time", readOnly: true },
@@ -1261,8 +1261,9 @@ definition.paths = {
       summary: "STAFF/ADMIN cập nhật trạng thái Order và tự động xử lý kho",
       description:
         "Chỉ STAFF và ADMIN được gọi; CUSTOMER và STORAGE_MANAGER trả 403. " +
-        "Body chỉ có status. Quy tắc: pending → confirmed/rejected/cancelled; confirmed → rejected/cancelled. " +
-        "Cùng trạng thái, chuyển về pending hoặc chuyển tiếp từ rejected/cancelled trả 409. " +
+        "Body chỉ có status. Quy tắc: pending → confirmed/rejected/cancelled; confirmed → shipping/rejected/cancelled; shipping → delivered. " +
+        "Cùng trạng thái, chuyển về pending hoặc chuyển tiếp từ delivered/rejected/cancelled trả 409. " +
+        "shipping/delivered chỉ cập nhật trạng thái trong transaction, không đổi tồn kho, lịch sử kho hay Payment. " +
         "confirmed gọi confirmOrder để kiểm tra tất cả variant/tồn kho, trừ kho và ghi DEDUCTION. " +
         "rejected/cancelled dùng chung nghiệp vụ đóng đơn: chỉ hoàn kho nếu nguồn là confirmed và lịch sử trừ khớp toàn bộ items. " +
         "Không đủ hàng trả 400; thiếu Variant/Inventory trả 404. " +
@@ -1277,6 +1278,14 @@ definition.paths = {
           confirmed: { value: {
             message: "Order status updated successfully",
             order: { _id: "507f1f77bcf86cd799439011", status: "confirmed", updatedAt: "2026-09-24T03:00:00.000Z" },
+          } },
+          shipping: { value: {
+            message: "Order status updated successfully",
+            order: { _id: "507f1f77bcf86cd799439011", status: "shipping", updatedAt: "2026-10-20T03:00:00.000Z" },
+          } },
+          delivered: { value: {
+            message: "Order status updated successfully",
+            order: { _id: "507f1f77bcf86cd799439011", status: "delivered", updatedAt: "2026-10-20T04:00:00.000Z" },
           } },
         }),
       },
@@ -1589,15 +1598,15 @@ definition.paths = {
 
   "/api/users/profile": {
     get: {
-      tags: ["User"], summary: "CUSTOMER xem hồ sơ của mình",
+      tags: ["User"], summary: "CUSTOMER/STAFF/STORAGE_MANAGER xem hồ sơ của mình",
       security: [{ bearerAuth: [] }],
-      description: "Lấy userId từ JWT; không nhận query hoặc body có field. Chỉ CUSTOMER đang active. " +
+      description: "Lấy userId từ JWT; không nhận query hoặc body có field. Cho CUSTOMER, STAFF và STORAGE_MANAGER đang active; ADMIN giữ nguyên không có quyền. " +
         "Chỉ trả các field công khai; không trả password, token, secret hoặc dữ liệu bảo mật. Địa chỉ dùng /api/addresses riêng.",
       responses: {
-        200: response("Hồ sơ của Customer đang đăng nhập", "CustomerProfileResponse"),
+        200: response("Hồ sơ của tài khoản đang đăng nhập", "CustomerProfileResponse"),
         400: response("Query hoặc body không được hỗ trợ", "CustomerProfileError"),
         401: response("Thiếu JWT, token sai/hết hạn hoặc userId trong token sai định dạng", "CustomerProfileError"),
-        403: response("Role không phải CUSTOMER hoặc tài khoản hiện tại đã inactive/đổi role", "CustomerProfileError"),
+        403: response("Role không thuộc CUSTOMER/STAFF/STORAGE_MANAGER hoặc tài khoản hiện tại inactive/đổi sang role không được phép", "CustomerProfileError"),
         404: response("User không tồn tại", "CustomerProfileError"),
         500: response("Lỗi hệ thống; không trả thông tin lỗi nội bộ", "CustomerProfileError"),
       },
@@ -2234,8 +2243,7 @@ definition.paths = {
       post: {
         tags: ["Review"], summary: "CUSTOMER tạo đánh giá Product", security,
         description: "User lấy từ JWT. Chỉ Product active; mỗi Customer tối đa một review active cho Product. " +
-          "Review đã xóa mềm không chặn tạo lại. Chưa áp dụng verified purchase: enum Order hiện chỉ có " +
-          "pending/confirmed/rejected/cancelled, chưa có trạng thái hoàn thành; confirmed vẫn có thể hủy/từ chối. " +
+          "Review đã xóa mềm không chặn tạo lại. Giữ chính sách chưa áp dụng verified purchase khi bổ sung shipping/delivered. " +
           "Khách chưa mua cũng có thể review; API không khẳng định đã xác minh mua hàng.",
         requestBody: request(ref("ReviewCreateRequest")),
         responses: {
@@ -2301,6 +2309,8 @@ definition.paths = {
       properties: {
         pending: { type: "integer", minimum: 0, example: 2, description: "Số đơn hàng đang chờ xử lý." },
         confirmed: { type: "integer", minimum: 0, example: 5, description: "Số đơn hàng đã được xác nhận." },
+        shipping: { type: "integer", minimum: 0, example: 2, description: "Số đơn hàng đang giao." },
+        delivered: { type: "integer", minimum: 0, example: 3, description: "Số đơn hàng đã giao thành công." },
         rejected: { type: "integer", minimum: 0, example: 1, description: "Số đơn hàng bị từ chối." },
         cancelled: { type: "integer", minimum: 0, example: 1, description: "Số đơn hàng bị hủy." },
       },
@@ -2345,7 +2355,7 @@ definition.paths = {
           type: "number",
           minimum: 0,
           example: 300.3,
-          description: "Tổng doanh thu từ các khoản thanh toán đã hoàn thành (Payment.status = paid) thuộc đơn hàng đã xác nhận (Order.status = confirmed).",
+          description: "Tổng doanh thu từ Payment.status = paid thuộc đơn hàng confirmed, shipping hoặc delivered; giữ doanh thu khi đơn tiến triển qua luồng giao hàng.",
         },
         ordersByStatus: ref("OrdersByStatus"),
       },

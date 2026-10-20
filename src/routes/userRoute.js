@@ -33,11 +33,11 @@ router.get(
   userController.getAllUsers
 );
 
-// Profile của CUSTOMER đăng nhập; phân quyền riêng từng route để giữ quyền ADMIN tạo nhân viên.
+// Xem hồ sơ chính chủ cho CUSTOMER/STAFF/STORAGE_MANAGER; quyền sửa vẫn chỉ CUSTOMER.
 router.get(
   "/profile",
   authMiddleware,
-  authorizeRoles(ROLES.CUSTOMER),
+  authorizeRoles(ROLES.CUSTOMER, ROLES.STAFF, ROLES.STORAGE_MANAGER),
   validateProfileRequest,
   userController.getProfile
 );

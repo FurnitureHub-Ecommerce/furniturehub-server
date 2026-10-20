@@ -13,8 +13,8 @@ const requireProduct = async (productId) => {
 
 /**
  * Lấy chủ sở hữu từ JWT, kiểm tra Product active rồi kiểm tra review trùng trước khi tạo.
- * Order hiện chỉ có pending/confirmed/rejected/cancelled; confirmed vẫn có thể hủy.
- * Chưa có trạng thái hoàn thành nên chưa áp dụng xác minh mua hàng, không suy diễn từ Payment.
+ * Giữ chính sách review hiện có: không yêu cầu xác minh mua hàng hay suy diễn từ Payment.
+ * Bổ sung trạng thái giao hàng không tự thay đổi điều kiện được tạo review.
  * Unique index chỉ áp dụng review active và bảo vệ cả trường hợp tạo đồng thời.
  */
 const create = async (userId, data) => {

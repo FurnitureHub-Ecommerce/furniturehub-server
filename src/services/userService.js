@@ -4,7 +4,7 @@
  * Mục đích:
  * Tầng nghiệp vụ (Service Layer) quản lý người dùng FurnitureHub.
  * Cung cấp chức năng cho phép ADMIN tạo tài khoản nhân viên (STAFF, STORAGE_MANAGER).
- * CUSTOMER được đọc hồ sơ và cập nhật fullName/phone qua các hàm Profile riêng.
+ * CUSTOMER/STAFF/STORAGE_MANAGER được đọc hồ sơ; chỉ CUSTOMER được sửa fullName/phone.
  *
  * Các bước xử lý trong hàm createUser:
  * Bước 1: Kiểm tra tính hợp lệ của vai trò (role). Chỉ chấp nhận STAFF hoặc STORAGE_MANAGER.
@@ -35,8 +35,8 @@ const getProfile = async (userId) => {
   }
   const user = await userRepository.findProfileById(userId);
   if (!user) throw profileError("User not found", 404);
-  if (!user.isActive || user.role !== ROLES.CUSTOMER) {
-    throw profileError("Profile is only available to active customers", 403);
+  if (!user.isActive || ![ROLES.CUSTOMER, ROLES.STAFF, ROLES.STORAGE_MANAGER].includes(user.role)) {
+    throw profileError("Profile is only available to active customers, staff or storage managers", 403);
   }
   return user;
 };
@@ -47,7 +47,11 @@ const getProfile = async (userId) => {
  * Trả hồ sơ mới qua projection an toàn; Address được quản lý ở API riêng.
  */
 const updateProfile = async (userId, data) => {
-  await getProfile(userId);
+  const currentUser = await getProfile(userId);
+  // Giữ quyền sửa riêng của CUSTOMER cả khi Service được gọi trực tiếp.
+  if (currentUser.role !== ROLES.CUSTOMER) {
+    throw profileError("Profile updates are only available to active customers", 403);
+  }
   const changes = {};
   if (data.fullName !== undefined) changes.fullName = data.fullName;
   if (data.phone !== undefined) changes.phone = data.phone;
