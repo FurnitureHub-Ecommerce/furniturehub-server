@@ -2355,7 +2355,7 @@ definition.paths = {
           type: "number",
           minimum: 0,
           example: 300.3,
-          description: "Tổng doanh thu từ Payment.status = paid thuộc đơn hàng confirmed, shipping hoặc delivered; giữ doanh thu khi đơn tiến triển qua luồng giao hàng.",
+          description: "Tổng totalAmount của các đơn hàng có trạng thái delivered (đã giao thành công), không phụ thuộc trạng thái Payment. Trả về 0 nếu không có đơn delivered.",
         },
         ordersByStatus: ref("OrdersByStatus"),
       },
