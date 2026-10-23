@@ -14,20 +14,15 @@
  * 4. totalOrders: Đếm tổng số document đơn hàng (Order) trong database, không đếm subdocuments items hay số lượng sản phẩm.
  * 5. ordersByStatus: Thống kê số lượng đơn hàng theo đủ sáu trạng thái trong enum dùng chung.
  *    Nếu một trạng thái không có đơn hàng nào, giá trị trả về vẫn phải là 0, không được bỏ qua key.
- * 6. totalRevenue: Doanh thu thực tế được tính từ các khoản thanh toán đã hoàn thành (Payment.status = "paid")
- *    thuộc về các đơn hàng đã xác nhận, đang giao hoặc đã giao (confirmed/shipping/delivered).
- *    - Không tính các Payment đang chờ (pending), thất bại (failed), hoặc bị hủy (cancelled).
- *    - Không tính các Payment dù đã "paid" nhưng Order bị hủy (cancelled) hoặc từ chối (rejected).
- *    - Không tính các Payment mồ côi (orphan Payment: orderId không trỏ tới Order nào tồn tại).
- *    - Sử dụng giá trị snapshot Payment.amount thay vì tính lại từ giá Product/Variant hiện tại,
- *      vì giá sản phẩm có thể thay đổi sau khi thanh toán được ghi nhận.
+ * 6. totalRevenue: Tổng totalAmount của các đơn hàng có status = "delivered".
+ *    - Không phụ thuộc vào sự tồn tại hay trạng thái của Payment.
+ *    - Sử dụng tổng tiền đã lưu trên Order, không tính lại từ giá Product/Variant hiện tại.
  *    - Xử lý làm tròn số học (decimal rounding) để tránh lỗi floating-point đặc trưng của JavaScript (ví dụ: 100.1 + 200.2 = 300.29999999999995).
  */
 
 const User = require("../models/userModel");
 const Product = require("../models/productModel");
 const Order = require("../models/orderModel");
-const Payment = require("../models/paymentModel");
 const { ORDER_STATUSES } = require("../constants/orderStatus");
 
 /**
@@ -76,38 +71,17 @@ const getStatistics = async () => {
       },
     ]),
 
-    // 6. Tính tổng doanh thu:
-    // - Chỉ lấy Payment có status là "paid".
-    // - Lookup sang collection "orders" để kiểm tra đơn hàng tương ứng có tồn tại.
-    // - Unwind kết quả lookup; nếu đơn hàng không tồn tại (orphan payment) thì pipeline sẽ loại bỏ.
-    // - Giữ doanh thu đã thanh toán khi đơn chuyển từ confirmed sang shipping/delivered.
-    // - Group tính tổng trường amount (snapshot số tiền thanh toán thực tế).
-    Payment.aggregate([
+    // 6. Cộng tổng tiền đã lưu của các đơn hàng giao thành công.
+    Order.aggregate([
       {
         $match: {
-          status: "paid",
-        },
-      },
-      {
-        $lookup: {
-          from: "orders",
-          localField: "orderId",
-          foreignField: "_id",
-          as: "order",
-        },
-      },
-      {
-        $unwind: "$order",
-      },
-      {
-        $match: {
-          "order.status": { $in: ["confirmed", "shipping", "delivered"] },
+          status: "delivered",
         },
       },
       {
         $group: {
           _id: null,
-          totalRevenue: { $sum: "$amount" },
+          totalRevenue: { $sum: "$totalAmount" },
         },
       },
     ]),
