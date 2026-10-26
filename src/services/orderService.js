@@ -10,7 +10,7 @@ const addressService = require("./addressService");
 const cartRepository = require("../repositories/cartRepository");
 const checkoutService = require("./checkoutService");
 const inventoryRepository = require("../repositories/inventoryRepository");
-const { orderIdSchema, ordersQuerySchema } = require("../validators/orderValidator");
+const { orderIdSchema, ordersQuerySchema, rejectOrderSchema, cancelOrderSchema } = require("../validators/orderValidator");
 const { ORDER_STATUSES, ORDER_STATUS_TRANSITIONS } = require("../constants/orderStatus");
 const Payment = require("../models/paymentModel");
 const ROLES = require("../constants/roles");
@@ -45,6 +45,7 @@ const createOrder = async (userId, addressId) => {
   const order = new Order({
     userId,
     status: "pending",
+    statusHistory: [{ status: "pending", reason: null, actionBy: userId, actorRole: ROLES.CUSTOMER, actionAt: new Date() }],
     shippingAddress: {
       receiverName: address.receiverName,
       phone: address.phone,
@@ -96,7 +97,7 @@ const getOrderById = async (userId, orderId) => {
     error.statusCode = 404;
     throw error;
   }
-  return order;
+  return { ...order, statusHistory: order.statusHistory ?? [] };
 };
 
 const makeError = (message, statusCode) => Object.assign(new Error(message), { statusCode });
@@ -145,7 +146,7 @@ const listOrders = async (filter, query) => {
       .skip((page - 1) * limit).limit(limit).lean(),
     Order.countDocuments(filter),
   ]);
-  return { orders, pagination: { page, limit, totalItems, totalPages: Math.ceil(totalItems / limit) } };
+  return { orders: orders.map((order) => ({ ...order, statusHistory: order.statusHistory ?? [] })), pagination: { page, limit, totalItems, totalPages: Math.ceil(totalItems / limit) } };
 };
 
 /**
@@ -155,17 +156,17 @@ const listOrders = async (filter, query) => {
  * Bước 3: So sánh userId với JWT; đơn của người khác trả 403 trước khi trả dữ liệu.
  * Bước 4: Trả orderId, status, createdAt, updatedAt thực tế từ Order.
  * updatedAt là lần sửa document, không suy diễn thành ngày giao/xác nhận đơn.
- * Không có Shipment hay timeline trong schema nên không tạo thông tin giả.
+ * statusHistory trả các sự kiện đã ghi; đơn cũ chưa có lịch sử trả [], không tạo thông tin giả.
  */
 const getOrderTracking = async (user, orderId) => {
   const userId = validateActor(user, [ROLES.CUSTOMER]);
   validateOrderId(orderId);
-  const order = await Order.findById(orderId).select("_id userId status createdAt updatedAt").lean();
+  const order = await Order.findById(orderId).select("_id userId status createdAt updatedAt statusHistory").lean();
   if (!order) throw makeError("Order not found", 404);
   if (order.userId.toString().toLowerCase() !== userId.toString().toLowerCase()) {
     throw makeError("You do not have permission to track this order", 403);
   }
-  return { orderId: order._id, status: order.status, createdAt: order.createdAt, updatedAt: order.updatedAt };
+  return { orderId: order._id, status: order.status, createdAt: order.createdAt, updatedAt: order.updatedAt, statusHistory: order.statusHistory ?? [] };
 };
 
 /**
@@ -229,11 +230,13 @@ const findOrder = async (orderId, session) => {
 };
 
 // Điều kiện trạng thái nguồn ngăn ghi đè một chuyển trạng thái đã được xử lý.
-const setOrderStatus = async (orderId, fromStatus, status, session) => {
+const setOrderStatus = async (orderId, fromStatus, status, session, user, reason = null) => {
+  // Sự kiện và trạng thái được ghi chung transaction với kho/thanh toán, kể cả khi retry.
+  const event = { status, reason, actionBy: user.userId, actorRole: user.role, actionAt: new Date() };
   const updated = await Order.findOneAndUpdate(
     { _id: orderId, status: fromStatus },
-    { $set: { status } },
-    { returnDocument: "after", runValidators: true, select: "_id status updatedAt", session }
+    { $set: { status }, $push: { statusHistory: event } },
+    { returnDocument: "after", runValidators: true, select: "_id status updatedAt statusHistory", session }
   ).lean();
   if (!updated) throw makeError("Order status has already been changed by another request", 409);
   return updated;
@@ -256,7 +259,7 @@ const confirmOrder = async (orderId, user) => {
     }
     const deductions = getOrderQuantities(order.items);
     await inventoryRepository.deductStockForOrder(deductions, orderId, userId, session);
-    return setOrderStatus(orderId, "pending", "confirmed", session);
+    return setOrderStatus(orderId, "pending", "confirmed", session, user);
   });
 };
 
@@ -285,10 +288,13 @@ const validateDeductionHistory = (items, deductions) => {
  * RESTORE, tồn kho và trạng thái đơn nằm trong cùng transaction; lỗi ở đâu cũng rollback.
  * Giữ ràng buộc thanh toán đã có: chặn đơn paid, đồng bộ payment pending khi đóng đơn.
  */
-const finishOrder = async (orderId, status, user) => {
+const finishOrder = async (orderId, status, user, reason) => {
   validateOrderId(orderId);
   const allowedRoles = status === "cancelled" ? [ROLES.CUSTOMER, ROLES.STAFF, ROLES.ADMIN] : [ROLES.STAFF, ROLES.ADMIN];
   const userId = validateActor(user, allowedRoles);
+  const result = (status === "rejected" ? rejectOrderSchema : cancelOrderSchema).safeParse({ reason });
+  if (!result.success) throw makeError(result.error.issues.map((issue) => issue.message).join(", "), 400);
+  const normalizedReason = result.data.reason ?? null;
   return withTransaction(async (session) => {
     const order = await findOrder(orderId, session);
     if (user.role === ROLES.CUSTOMER && order.userId.toString() !== userId.toString()) {
@@ -312,7 +318,7 @@ const finishOrder = async (orderId, status, user) => {
       throw makeError("Pending order has stock deduction history; reconciliation is required", 409);
     }
 
-    const updated = await setOrderStatus(orderId, order.status, status, session);
+    const updated = await setOrderStatus(orderId, order.status, status, session, user, normalizedReason);
     if (payment?.status === "pending") {
       const result = await Payment.updateOne(
         { _id: payment._id, status: "pending" },
@@ -325,27 +331,27 @@ const finishOrder = async (orderId, status, user) => {
   });
 };
 
-const rejectOrder = (orderId, user) => finishOrder(orderId, "rejected", user);
-const cancelOrder = (orderId, user) => finishOrder(orderId, "cancelled", user);
+const rejectOrder = (orderId, user, reason) => finishOrder(orderId, "rejected", user, reason);
+const cancelOrder = (orderId, user, reason) => finishOrder(orderId, "cancelled", user, reason);
 
 /**
  * API đổi trạng thái đi qua nghiệp vụ xác nhận/từ chối/hủy hoặc giao hàng tương ứng.
  * Không có đường cập nhật trực tiếp để bỏ qua kiểm tra kho, lịch sử hoặc quyền.
  */
-const updateOrderStatus = async (orderId, status, user) => {
+const updateOrderStatus = async (orderId, status, user, reason) => {
   validateOrderId(orderId);
   validateActor(user, [ROLES.STAFF, ROLES.ADMIN]);
   if (!ORDER_STATUSES.includes(status)) throw makeError("Invalid order status", 400);
   if (status === "confirmed") return confirmOrder(orderId, user);
-  if (status === "rejected") return rejectOrder(orderId, user);
-  if (status === "cancelled") return cancelOrder(orderId, user);
+  if (status === "rejected") return rejectOrder(orderId, user, reason);
+  if (status === "cancelled") return cancelOrder(orderId, user, reason);
   if (status === "shipping" || status === "delivered") {
     // Kho đã trừ khi confirmed; giao hàng chỉ đổi trạng thái, không ghi kho hay Payment.
     // Đọc và ghi trong transaction, kèm trạng thái nguồn để chặn ghi đè yêu cầu đồng thời.
     return withTransaction(async (session) => {
       const order = await findOrder(orderId, session);
       assertOrderStatusTransition(order.status, status);
-      return setOrderStatus(orderId, order.status, status, session);
+      return setOrderStatus(orderId, order.status, status, session, user);
     });
   }
   const order = await Order.findById(orderId).select("_id status").lean();

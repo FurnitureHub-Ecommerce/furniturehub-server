@@ -166,11 +166,35 @@ const definition = {
       // Dùng cùng enum với Model và Validator để tài liệu không lệch quy tắc.
       UpdateOrderStatusInput: {
         type: "object", required: ["status"], additionalProperties: false,
+        oneOf: [
+          { required: ["reason"], properties: { status: { enum: ["rejected"] } } },
+          { properties: { status: { enum: ["cancelled"] } } },
+          { properties: { status: { enum: ORDER_STATUSES.filter((status) => !["rejected", "cancelled"].includes(status)) } }, not: { required: ["reason"] } },
+        ],
         description:
-          "Chỉ nhận status. Enum hợp lệ chưa đồng nghĩa được phép chuyển trạng thái; " +
+          "Nhận status và reason: bắt buộc khi rejected, tùy chọn khi cancelled, cấm ở trạng thái khác. Enum hợp lệ chưa đồng nghĩa được phép chuyển trạng thái; " +
           "Service còn kiểm tra trạng thái hiện tại và nghiệp vụ tương ứng.",
         properties: {
           status: { type: "string", enum: ORDER_STATUSES, example: "confirmed" },
+          reason: { type: "string", minLength: 1, maxLength: 500, description: "Trim trước kiểm tra; không được chỉ chứa khoảng trắng." },
+        },
+      },
+      RejectOrderInput: {
+        type: "object", required: ["reason"], additionalProperties: false,
+        properties: { reason: { type: "string", minLength: 1, maxLength: 500, example: "Sản phẩm hiện không đủ số lượng trong kho", description: "Bắt buộc string, trim trước kiểm tra; không chấp nhận chuỗi rỗng." } },
+      },
+      CancelOrderInput: {
+        type: "object", additionalProperties: false,
+        properties: { reason: { type: "string", minLength: 1, maxLength: 500, description: "Tùy chọn; nếu gửi phải là string không rỗng sau trim." } },
+      },
+      OrderStatusEvent: {
+        type: "object", required: ["status", "reason", "actionBy", "actorRole", "actionAt"],
+        properties: {
+          status: { type: "string", enum: ORDER_STATUSES },
+          reason: { type: "string", nullable: true, maxLength: 500 },
+          actionBy: { type: "string", description: "ID người thao tác từ JWT; không populate dữ liệu riêng tư." },
+          actorRole: { type: "string", enum: ["CUSTOMER", "STAFF", "ADMIN"] },
+          actionAt: { type: "string", format: "date-time" },
         },
       },
       OrderShippingAddress: {
@@ -206,6 +230,7 @@ const definition = {
             description: "Đơn mới pending; confirmed trừ kho; shipping → delivered không đổi kho. rejected/cancelled hoàn kho nếu nguồn là confirmed.",
           },
           shippingAddress: { $ref: "#/components/schemas/OrderShippingAddress" },
+          statusHistory: { type: "array", items: ref("OrderStatusEvent"), description: "Sự kiện theo thứ tự ghi. Đơn cũ không có lịch sử trả []; không suy đoán lý do/actor." },
           items: { type: "array", minItems: 1, items: { $ref: "#/components/schemas/OrderItem" } },
           subtotal: { type: "number", minimum: 0 },
           totalAmount: { type: "number", minimum: 0, description: "Bằng subtotal; không phí, thuế, giảm giá" },
@@ -247,6 +272,7 @@ const definition = {
             type: "object", required: ["orderId", "status", "createdAt", "updatedAt"],
             properties: {
               orderId: id,
+              statusHistory: { type: "array", items: ref("OrderStatusEvent") },
               status: { type: "string", enum: ORDER_STATUSES },
               createdAt: { type: "string", format: "date-time" },
               updatedAt: {
@@ -266,7 +292,8 @@ const definition = {
             type: "object", required: ["_id", "status", "updatedAt"],
             properties: {
               _id: { type: "string" },
-              status: { type: "string", enum: ["confirmed", "rejected", "cancelled"] },
+              status: { type: "string", enum: ORDER_STATUSES },
+              statusHistory: { type: "array", items: ref("OrderStatusEvent") },
               updatedAt: { type: "string", format: "date-time" },
             },
           },
@@ -285,6 +312,7 @@ const definition = {
             properties: {
               _id: { type: "string", example: "507f1f77bcf86cd799439011" },
               status: { type: "string", enum: ["confirmed", "rejected", "cancelled"], example: "confirmed" },
+              statusHistory: { type: "array", items: ref("OrderStatusEvent") },
               updatedAt: { type: "string", format: "date-time" },
             },
           },
@@ -1200,8 +1228,8 @@ definition.paths = {
       description:
         "Yêu cầu JWT và role CUSTOMER. Validate ObjectId trước truy vấn (400). " +
         "Không tồn tại trả 404; tồn tại nhưng userId khác JWT trả 403. " +
-        "Chỉ trả orderId, status, createdAt, updatedAt được lưu trong Order. " +
-        "Chưa có Shipment, trackingNumber hoặc các mốc confirmedAt/shippedAt/deliveredAt/cancelledAt. " +
+        "Trả orderId, status, createdAt, updatedAt và statusHistory gồm status/reason/actionBy/actorRole/actionAt thực tế. " +
+        "Đơn cũ không có lịch sử trả []; reason chưa ghi nhận là null. Chưa có Shipment/trackingNumber. " +
         "updatedAt không đại diện một mốc giao hàng; API không suy diễn timeline.",
       security: [{ bearerAuth: [] }],
       parameters: [{ name: "id", in: "path", required: true, description: "ObjectId của Order gồm 24 ký tự hex.", schema: id }],
@@ -1261,7 +1289,7 @@ definition.paths = {
       summary: "STAFF/ADMIN cập nhật trạng thái Order và tự động xử lý kho",
       description:
         "Chỉ STAFF và ADMIN được gọi; CUSTOMER và STORAGE_MANAGER trả 403. " +
-        "Body chỉ có status. Quy tắc: pending → confirmed/rejected/cancelled; confirmed → shipping/rejected/cancelled; shipping → delivered. " +
+        "Body có status; reason bắt buộc khi rejected, tùy chọn khi cancelled, cấm ở trạng thái khác. Quy tắc: pending → confirmed/rejected/cancelled; confirmed → shipping/rejected/cancelled; shipping → delivered. " +
         "Cùng trạng thái, chuyển về pending hoặc chuyển tiếp từ delivered/rejected/cancelled trả 409. " +
         "shipping/delivered chỉ cập nhật trạng thái trong transaction, không đổi tồn kho, lịch sử kho hay Payment. " +
         "confirmed gọi confirmOrder để kiểm tra tất cả variant/tồn kho, trừ kho và ghi DEDUCTION. " +
@@ -1324,7 +1352,7 @@ definition.paths = {
       tags: ["Order"],
       summary: "STAFF/ADMIN từ chối đơn pending/confirmed; hoàn kho nếu đã trừ",
       description:
-        "Chỉ STAFF và ADMIN được gọi; không cần body. pending → rejected không cộng kho vì chưa từng trừ. " +
+        "Chỉ STAFF và ADMIN được gọi; body bắt buộc reason dạng string 1–500 ký tự sau trim; thiếu/rỗng/sai kiểu/quá dài trả 400. pending → rejected không cộng kho vì chưa từng trừ. " +
         "confirmed → rejected hoàn đúng quantity theo lịch sử DEDUCTION, sau khi đối chiếu đầy đủ với Order.items. " +
         "Lịch sử thiếu/không khớp hoặc đã có RESTORE trả 409. Thiếu Variant/Inventory khi hoàn kho trả 404; không ghi RESTORE giả. " +
         "Ghi RESTORE với before/after, orderId, variantId, inventoryId, createdBy từ JWT và note. " +
@@ -1333,12 +1361,13 @@ definition.paths = {
         "Cần replica set/Atlas; standalone trả 503. PATCH /status với status=rejected dùng cùng nghiệp vụ.",
       security: [{ bearerAuth: [] }],
       parameters: [idParam()],
+      requestBody: requestBody("RejectOrderInput"),
       responses: {
         ...orderStockErrors,
         200: checkoutResponse("Đã từ chối đơn và hoàn kho nếu đã confirmed", "OrderConfirmRejectResult", {
           rejected: { value: {
             message: "Order rejected successfully",
-            data: { _id: "507f1f77bcf86cd799439011", status: "rejected", updatedAt: "2026-09-24T03:00:00.000Z" },
+            data: { _id: "507f1f77bcf86cd799439011", status: "rejected", updatedAt: "2026-10-26T02:00:00.000Z", statusHistory: [{ status: "rejected", reason: "Sản phẩm hiện không đủ số lượng trong kho", actionBy: "507f1f77bcf86cd799439012", actorRole: "STAFF", actionAt: "2026-10-26T02:00:00.000Z" }] },
           } },
         }),
       },
@@ -1350,7 +1379,7 @@ definition.paths = {
       summary: "Customer hủy đơn của mình / STAFF, ADMIN hủy đơn pending hoặc confirmed",
       description:
         "CUSTOMER chỉ được hủy đơn của mình; STAFF/ADMIN được hủy đơn hợp lệ. STORAGE_MANAGER trả 403. " +
-        "Không cần body. pending → cancelled không cộng kho; confirmed → cancelled hoàn theo DEDUCTION đã lưu. " +
+        "Body tùy chọn {reason}; nếu gửi phải là string 1–500 ký tự sau trim, bỏ trống lưu null. statusHistory lưu đúng actorRole/actionBy, không mặc định Customer yêu cầu hủy. pending → cancelled không cộng kho; confirmed → cancelled hoàn theo DEDUCTION đã lưu. " +
         "Lịch sử phải đầy đủ, khớp Order.items và chưa có RESTORE. Thiếu Variant/Inventory trả 404 và giữ nguyên đơn/kho/lịch sử. " +
         "RESTORE lưu số trước/sau và createdBy từ JWT. Gọi lại hoặc reject/cancel đồng thời chỉ hoàn một lần. " +
         "Nếu Payment paid, trả 409 do chưa có quy trình hoàn tiền; Payment pending được đồng bộ cancelled trong cùng transaction. " +
@@ -1359,6 +1388,7 @@ definition.paths = {
         "PATCH /status với status=cancelled dùng cùng nghiệp vụ, vẫn chỉ cho STAFF/ADMIN.",
       security: [{ bearerAuth: [] }],
       parameters: [idParam()],
+      requestBody: { ...requestBody("CancelOrderInput"), required: false },
       responses: {
         ...orderStockErrors,
         200: checkoutResponse("Đã hủy đơn và hoàn kho nếu đã confirmed", "OrderConfirmRejectResult", {
@@ -1798,9 +1828,20 @@ definition.paths = {
   "/api/products/admin": {
     get: api({
       tag: "Product",
-      summary: "Admin xem tất cả Product",
+      summary: "ADMIN/STORAGE_MANAGER xem tất cả Product",
       secured: true,
+      description: "Bao gồm active/inactive và Product chưa có Variant/Inventory. Không lọc createdBy. Không có query giữ response {products} đầy đủ; có query trả thêm pagination và phân trang. Nhận search/categoryId/brandId/minPrice/maxPrice/sort/page/limit như catalog. Bộ lọc giá nội bộ xét cả Variant inactive; không có Variant chỉ bị loại khi lọc giá. Không cấp quyền ghi Product cho Manager.",
+      params: [
+        ...["search", "categoryId", "brandId"].map((name) => ({ name, in: "query", schema: { type: "string" } })),
+        ...["minPrice", "maxPrice"].map((name) => ({ name, in: "query", schema: { type: "number", minimum: 0 } })),
+        { name: "sort", in: "query", schema: { type: "string", enum: ["newest", "oldest", "name_asc", "name_desc", "price_asc", "price_desc"], default: "newest" } },
+        { name: "page", in: "query", schema: { type: "integer", minimum: 1, default: 1 } },
+        { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 100, default: 10 } },
+      ],
     }),
+  },
+  "/api/products/admin/{id}": {
+    get: api({ tag: "Product", summary: "ADMIN/STORAGE_MANAGER đọc chi tiết Product active/inactive", secured: true, params: [idParam()], description: "Trả {product}; giữ availableStock theo quy tắc hiện có (chỉ cộng Variant active)." }),
   },
 
   "/api/products/{id}": {
@@ -1852,10 +1893,10 @@ definition.paths = {
   "/api/products/{productId}/variants/admin": {
     get: api({
       tag: "Variant",
-      summary: "Admin xem tất cả Variant của Product",
+      summary: "ADMIN/STORAGE_MANAGER xem tất cả Variant của Product",
       secured: true,
       params: [idParam("productId")],
-      description: "Bao gồm Variant đã vô hiệu hóa.",
+      description: "Trả {variants} gồm SKU/thuộc tính và availableStock; bao gồm Product/Variant inactive. Chưa có Inventory thì availableStock=null, không ẩn Variant.",
     }),
   },
 
@@ -1883,6 +1924,9 @@ definition.paths = {
       secured: true,
       params: [idParam()],
     }),
+  },
+  "/api/variants/admin/{id}": {
+    get: api({ tag: "Variant", summary: "ADMIN/STORAGE_MANAGER đọc chi tiết Variant active/inactive", secured: true, params: [idParam()], description: "Trả {variant} gồm SKU và availableStock; chưa có Inventory thì availableStock=null." }),
   },
   // ================= WISHLIST =================
 

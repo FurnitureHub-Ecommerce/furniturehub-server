@@ -12,6 +12,16 @@
  */
 const mongoose = require("mongoose");
 const { ORDER_STATUSES } = require("../constants/orderStatus");
+const ROLES = require("../constants/roles");
+
+// Lưu sự kiện thật cùng đơn hàng; không suy đoán lý do hoặc người thao tác của dữ liệu cũ.
+const statusHistorySchema = new mongoose.Schema({
+  status: { type: String, enum: ORDER_STATUSES, required: true },
+  reason: { type: String, trim: true, maxlength: 500, default: null },
+  actionBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+  actorRole: { type: String, enum: Object.values(ROLES), required: true },
+  actionAt: { type: Date, required: true },
+}, { _id: false });
 
 const shippingAddressSchema = new mongoose.Schema({
   receiverName: { type: String, required: true, trim: true },
@@ -48,6 +58,7 @@ const orderSchema = new mongoose.Schema({
   // Enum chỉ kiểm tra giá trị lưu; quy tắc chuyển và nghiệp vụ do Order Service kiểm tra.
   // Đơn mới vẫn là pending; enum dùng chung hỗ trợ cả vận chuyển và giao thành công.
   status: { type: String, enum: ORDER_STATUSES, default: "pending", required: true },
+  statusHistory: { type: [statusHistorySchema], default: [] },
   subtotal: { type: Number, required: true, min: 0, max: Number.MAX_SAFE_INTEGER, validate: Number.isFinite, immutable: true },
   totalAmount: { type: Number, required: true, min: 0, max: Number.MAX_SAFE_INTEGER, validate: Number.isFinite, immutable: true },
 }, { timestamps: true });

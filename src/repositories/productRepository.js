@@ -135,6 +135,7 @@ const searchCatalog = async ({
   sort,
   page,
   limit,
+  includeInactiveVariants = false,
 }) => {
   // Tính số sản phẩm cần bỏ qua.
   const skip = (page - 1) * limit;
@@ -162,9 +163,7 @@ const searchCatalog = async ({
                   {
                     $eq: ["$productId", "$$productId"],
                   },
-                  {
-                    $eq: ["$isActive", true],
-                  },
+                  ...(includeInactiveVariants ? [] : [{ $eq: ["$isActive", true] }]),
                 ],
               },
             },
