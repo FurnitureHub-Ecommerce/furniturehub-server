@@ -16,6 +16,8 @@ const ROLES = require("../constants/roles");
 const {
   createOrderSchema,
   updateOrderStatusSchema,
+  rejectOrderSchema,
+  cancelOrderSchema,
   validateOrderId,
 } = require("../validators/orderValidator");
 
@@ -50,17 +52,19 @@ router.patch(
   "/:id/reject",
   authorizeRoles(ROLES.STAFF, ROLES.ADMIN),
   validateOrderId,
+  validate(rejectOrderSchema),
   orderController.rejectOrder
 );
 
 // Hủy đơn theo quyền hiện có: CUSTOMER, STAFF, ADMIN.
 // - CUSTOMER chỉ được hủy Order của chính mình (kiểm tra ở Service bằng req.user.userId).
 // - STORAGE_MANAGER (và STORAGE) không có quyền hủy đơn hàng (bị từ chối với 403 Forbidden).
-// - Không cần body; chỉ cần Order ID hợp lệ trên URL (validate qua validateOrderId).
+// - Body có thể gửi reason; bỏ trống thì lưu null, không tự gán lý do theo role.
 router.patch(
   "/:id/cancel",
   authorizeRoles(ROLES.CUSTOMER, ROLES.STAFF, ROLES.ADMIN),
   validateOrderId,
+  validate(cancelOrderSchema),
   orderController.cancelOrder
 );
 

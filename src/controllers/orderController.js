@@ -88,7 +88,7 @@ const getOrderTracking = async (req, res) => {
  */
 const updateOrderStatus = async (req, res) => {
   try {
-    const order = await orderService.updateOrderStatus(req.params.id, req.body.status, req.user);
+    const order = await orderService.updateOrderStatus(req.params.id, req.body.status, req.user, req.body.reason);
     return res.status(200).json({ message: "Order status updated successfully", order });
   } catch (error) {
     return handleError(res, error);
@@ -116,14 +116,14 @@ const confirmOrder = async (req, res) => {
 
 /**
  * Mục đích: từ chối đơn hàng (pending/confirmed → rejected) bởi STAFF hoặc ADMIN.
- * Nhận id từ URL đã qua validateOrderId; không cần body.
+ * Nhận id hợp lệ và reason đã trim từ body; bắt buộc lý do từ chối.
  * Gọi Service kiểm tra quy tắc trạng thái và cập nhật Order an toàn.
  * Pending chưa trừ kho; confirmed phải hoàn kho và ghi người thực hiện từ JWT.
  * Thành công trả 200 với { message, data }; mọi lỗi đi qua handleError.
  */
 const rejectOrder = async (req, res) => {
   try {
-    const order = await orderService.rejectOrder(req.params.id, req.user);
+    const order = await orderService.rejectOrder(req.params.id, req.user, req.body.reason);
     return res.status(200).json({
       message: "Order rejected successfully",
       data: order,
@@ -138,7 +138,7 @@ const rejectOrder = async (req, res) => {
  *
  * Mục đích:
  * Hủy đơn hàng (pending/confirmed → cancelled) bởi CUSTOMER (chính chủ), STAFF hoặc ADMIN.
- * Nhận id từ URL đã qua validateOrderId; không cần body.
+ * Nhận id từ URL; reason tùy chọn, không suy đoán lý do khi bỏ trống.
  * Gọi Service thực hiện đầy đủ nghiệp vụ:
  * - Kiểm tra quyền sở hữu (CUSTOMER chỉ hủy đơn của chính mình).
  * - Kiểm tra trạng thái pending/confirmed hợp lệ.
@@ -148,7 +148,7 @@ const rejectOrder = async (req, res) => {
  */
 const cancelOrder = async (req, res) => {
   try {
-    const order = await orderService.cancelOrder(req.params.id, req.user);
+    const order = await orderService.cancelOrder(req.params.id, req.user, req.body?.reason);
     return res.status(200).json({
       message: "Order cancelled successfully",
       data: order,

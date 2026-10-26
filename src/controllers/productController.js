@@ -75,11 +75,23 @@ const getAll = async (req, res) => {
  */
 const getAllAdmin = async (req, res) => {
   try {
+    // Giữ danh sách đầy đủ khi không có query; hỗ trợ phân trang/tìm kiếm khi có query.
+    if (Object.keys(req.query).length > 0) {
+      return res.status(200).json(await productService.getCatalog(req.query, true));
+    }
     const products = await productService.getAll(true);
 
     return res.status(200).json({
       products,
     });
+  } catch (error) {
+    return handleError(res, error);
+  }
+};
+
+const getByIdAdmin = async (req, res) => {
+  try {
+    return res.status(200).json({ product: await productService.getById(req.params.id, true) });
   } catch (error) {
     return handleError(res, error);
   }
@@ -180,6 +192,7 @@ const remove = async (req, res) => {
 module.exports = {
   getAll,
   getAllAdmin,
+  getByIdAdmin,
   getById,
   create,
   update,

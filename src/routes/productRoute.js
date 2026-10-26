@@ -47,7 +47,7 @@ router.get("/", productController.getAll);
  * Bước 6: API lấy toàn bộ Product cho Admin.
  *
  * - Kiểm tra JWT.
- * - Kiểm tra quyền ADMIN.
+ * - Kiểm tra quyền ADMIN hoặc STORAGE_MANAGER chỉ để đọc.
  * - Lấy cả sản phẩm đã vô hiệu hóa.
  *
  * Lưu ý:
@@ -56,9 +56,12 @@ router.get("/", productController.getAll);
 router.get(
   "/admin",
   authMiddleware,
-  authorizeRoles(ROLES.ADMIN),
+  authorizeRoles(ROLES.ADMIN, ROLES.STORAGE_MANAGER),
   productController.getAllAdmin
 );
+
+// Quyền đọc nội bộ độc lập với quyền sửa Product; không thay đổi API public.
+router.get("/admin/:id", authMiddleware, authorizeRoles(ROLES.ADMIN, ROLES.STORAGE_MANAGER), productController.getByIdAdmin);
 
 /**
  * Bước 7: API lấy chi tiết Product.

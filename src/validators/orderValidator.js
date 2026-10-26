@@ -30,9 +30,21 @@ const ordersQuerySchema = z.object({
 );
 
 // Không ép kiểu hay bỏ qua trường lạ: client không được sửa giá, items hoặc chủ đơn.
+const reasonSchema = z.string().trim().min(1, "Reason is required").max(500);
+const rejectOrderSchema = z.object({ reason: reasonSchema }).strict();
+// Hủy đơn vẫn cho phép không gửi body để tương thích API hiện tại.
+const cancelOrderSchema = z.object({ reason: reasonSchema.optional() }).strict().default({});
 const updateOrderStatusSchema = z.object({
   status: z.enum(ORDER_STATUSES),
-}).strict();
+  reason: reasonSchema.optional(),
+}).strict().superRefine((data, context) => {
+  if (data.status === "rejected" && data.reason === undefined) {
+    context.addIssue({ code: "custom", path: ["reason"], message: "Reason is required" });
+  }
+  if (data.reason !== undefined && !["rejected", "cancelled"].includes(data.status)) {
+    context.addIssue({ code: "custom", path: ["reason"], message: "Reason is only allowed for rejected or cancelled orders" });
+  }
+});
 
 /**
  * Kiểm tra ID trên URL sau xác thực/phân quyền và trước validate body.
@@ -50,6 +62,8 @@ module.exports = {
   createOrderSchema,
   orderIdSchema,
   updateOrderStatusSchema,
+  rejectOrderSchema,
+  cancelOrderSchema,
   validateOrderId,
   ordersQuerySchema,
   myOrdersQuerySchema: ordersQuerySchema,

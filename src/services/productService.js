@@ -211,7 +211,7 @@ const {
  * - Tính tổng số trang.
  * - Trả về danh sách và thông tin phân trang.
  */
-const getCatalog = async (query = {}) => {
+const getCatalog = async (query = {}, isManagement = false) => {
 
   // Bước 1: Kiểm tra dữ liệu đầu vào.
   const result = productQuerySchema.safeParse(query);
@@ -237,10 +237,9 @@ const getCatalog = async (query = {}) => {
     limit,
   } = result.data;
 
-  // Bước 3: Chỉ lấy sản phẩm đang hoạt động.
-  const filter = {
-    isActive: true,
-  };
+  // Bước 3: Public chỉ lấy sản phẩm active; nội bộ được đọc cả inactive.
+  // Chỉ controller nội bộ đã phân quyền mới truyền isManagement; client không điều khiển cờ này.
+  const filter = isManagement ? {} : { isActive: true };
 
   // Bước 4: Tìm kiếm theo tên sản phẩm.
   // Escape các ký tự đặc biệt để tránh chúng
@@ -312,6 +311,7 @@ const getCatalog = async (query = {}) => {
       sort: sortOptions[sort],
       page,
       limit,
+      includeInactiveVariants: isManagement,
     });
 
   // Bước 10: Tính tổng số trang.

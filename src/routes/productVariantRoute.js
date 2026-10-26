@@ -68,15 +68,18 @@ productVariantRouter.get(
  * Bước 7.1: Admin xem toàn bộ Variant.
  *
  * - Xác thực JWT.
- * - Kiểm tra quyền ADMIN.
+ * - Kiểm tra quyền ADMIN hoặc STORAGE_MANAGER chỉ để đọc.
  * - Bao gồm Variant đã bị vô hiệu hóa.
  */
 productVariantRouter.get(
   "/admin",
   authMiddleware,
-  authorizeRoles(ROLES.ADMIN),
+  authorizeRoles(ROLES.ADMIN, ROLES.STORAGE_MANAGER),
   variantController.getByProductIdAdmin
 );
+
+// Cho kho đọc SKU inactive mà không mở quyền tạo/sửa/xóa Variant.
+variantRouter.get("/admin/:id", authMiddleware, authorizeRoles(ROLES.ADMIN, ROLES.STORAGE_MANAGER), variantController.getByIdAdmin);
 
 /**
  * Bước 7.2: Admin tạo Variant.

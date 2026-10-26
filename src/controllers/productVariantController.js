@@ -184,7 +184,17 @@ const remove = async (req, res) => {
 };
 
 // Bước 9: Export các hàm.
+// Route nội bộ kiểm tra quyền đọc; không truy vấn thông tin User.
+const getByIdAdmin = async (req, res) => {
+  try {
+    return res.status(200).json({ variant: await variantService.getById(req.params.id, true) });
+  } catch (error) {
+    return handleError(res, error);
+  }
+};
+
 module.exports = {
+  getByIdAdmin,
   getByProductId,
   getByProductIdAdmin,
   getById,
