@@ -549,3 +549,29 @@ The project runs JavaScript directly and has no `npm run build` step.
 | PowerShell blocks `npm.ps1` | Use `npm.cmd ci` and `npm.cmd run dev` |
 
 An Android emulator typically reaches the host at `http://10.0.2.2:5000`. On a physical phone, use the backend computer's LAN IP, connect to the same Wi-Fi network and allow the backend port through the firewall.
+
+## Cấu hình CORS trên Render
+
+Đặt biến môi trường sau trong Render → Environment:
+
+```env
+CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173,https://furniturehub-web-uu6q.vercel.app
+```
+
+Nếu không khai báo, backend dùng ba origin trên làm mặc định. Khi khai báo,
+`CORS_ORIGINS` thay thế toàn bộ danh sách mặc định. Các mục được tách bằng dấu
+phẩy, bỏ khoảng trắng, mục rỗng và trùng lặp; origin phải khớp chính xác.
+Không dùng `*` hoặc cho phép toàn bộ domain Vercel. Cấu hình không bật cookie
+credentials; JWT tiếp tục được gửi bằng `Authorization: Bearer <token>`.
+CORS chạy trước JSON parser và routes; preflight hợp lệ được xử lý trước JWT.
+CORS chỉ kiểm soát quyền đọc phản hồi của trình duyệt, không thay thế xác thực.
+
+Render tiếp tục dùng `PORT` do nền tảng cấp. Kiểm tra cấu hình hiện có là
+`DB_MODE=atlas`, `MONGODB_URI_ATLAS` và `JWT_SECRET` đã được thiết lập; không
+đưa giá trị bí mật vào repository hoặc log. Không có thay đổi kết nối database.
+Sau khi thay đổi được duyệt và triển khai bằng quy trình Git hiện có, lưu biến
+môi trường và redeploy service. Kiểm tra GET `/api/categories`, `/api/products`,
+`/api/products?limit=100` và OPTIONS với Origin production; phản hồi phải có
+`Access-Control-Allow-Origin` đúng origin, preflight hỗ trợ `Authorization`.
+Kiểm tra thêm origin lạ không nhận header cho phép và API bảo vệ vẫn trả 401
+khi thiếu JWT. Kiểm thử local không xác nhận bản production đã được sửa.

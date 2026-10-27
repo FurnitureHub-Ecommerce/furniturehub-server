@@ -70,11 +70,32 @@ const {
 const app = express();
 
 /**
- * Cấu hình middleware xử lý JSON.
- *
- * Cho phép Backend đọc dữ liệu JSON từ request body.
- * Middleware phải được đăng ký trước các API routes.
+ * Giới hạn quyền truy cập từ trình duyệt bằng danh sách origin khớp chính xác.
+ * CORS_ORIGINS thay thế danh sách mặc định; bỏ khoảng trắng, giá trị rỗng và trùng lặp.
  */
+const allowedOrigins = new Set(
+  (process.env.CORS_ORIGINS ??
+    "http://localhost:5173,http://127.0.0.1:5173,https://furniturehub-web-uu6q.vercel.app")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean)
+);
+
+/**
+ * Đặt CORS trước JSON parser và routes để phản hồi lỗi cũng có header phù hợp.
+ * Middleware tự trả lời OPTIONS hợp lệ trước khi chạy xác thực JWT.
+ * Origin ngoài danh sách không nhận header cho phép truy cập từ trình duyệt.
+ */
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      callback(null, allowedOrigins.has(origin));
+    },
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
+
 app.use(express.json());
 
 /**
@@ -85,38 +106,6 @@ app.get("/", (req, res) => {
     message: "FurnitureHub API is running",
   });
 });
-
-/**
- * Cấu hình CORS.
- *
- * - Cho phép React Web chạy trên localhost:5173.
- * - Cho phép các phương thức HTTP cần thiết.
- * - Cho phép Content-Type và Authorization header.
- * - Phải đăng ký trước các API routes.
- */
-app.use(
-  cors({
-    origin: [
-      "http://localhost:5173",
-      "http://127.0.0.1:5173",
-    ],
-
-    methods: [
-      "GET",
-      "POST",
-      "PUT",
-      "PATCH",
-      "DELETE",
-      "OPTIONS",
-    ],
-
-    allowedHeaders: [
-      "Content-Type",
-      "Authorization",
-    ],
-  })
-);
-
 /**
  * Đăng ký các API của FurnitureHub.
  *
