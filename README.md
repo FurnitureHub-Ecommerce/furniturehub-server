@@ -555,10 +555,10 @@ An Android emulator typically reaches the host at `http://10.0.2.2:5000`. On a p
 Đặt biến môi trường sau trong Render → Environment:
 
 ```env
-CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173,https://furniturehub-web-uu6q.vercel.app
+CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173,https://furniturehub-web-uu6q.vercel.app,https://furniturehub-mobile-git-dev-danghoangtrucvys-projects.vercel.app
 ```
 
-Nếu không khai báo, backend dùng ba origin trên làm mặc định. Khi khai báo,
+Nếu không khai báo, backend dùng bốn origin trên làm mặc định. Khi khai báo,
 `CORS_ORIGINS` thay thế toàn bộ danh sách mặc định. Các mục được tách bằng dấu
 phẩy, bỏ khoảng trắng, mục rỗng và trùng lặp; origin phải khớp chính xác.
 Không dùng `*` hoặc cho phép toàn bộ domain Vercel. Cấu hình không bật cookie
