@@ -256,7 +256,7 @@ Luồng xử lý phổ biến: `Route -> Middleware -> Controller -> Service -> 
 | `npm ci` | Cài dependencies theo `package-lock.json` |
 | `npm run dev` | Chạy với Nodemon, tự khởi động lại khi sửa code |
 | `npm start` | Chạy bằng Node.js, không tự reload |
-| `npm test` | Chạy Node test runner; phiên bản này chưa có file test tự động |
+| `npm test` | Chạy Node test runner cho các file test có sẵn trên máy |
 
 Dự án chạy JavaScript trực tiếp, không có bước `npm run build`.
 
@@ -272,7 +272,7 @@ Dự án chạy JavaScript trực tiếp, không có bước `npm run build`.
 | `400 Bad Request` | Kiểm tra body/query theo Swagger; ID phải đúng định dạng, tránh gửi thêm field không hỗ trợ |
 | `409 Conflict` | Kiểm tra trạng thái đơn/payment và thông báo lỗi trước khi thử lại |
 | `EADDRINUSE` | Đổi `PORT` trong `.env` hoặc dừng tiến trình đang sử dụng cổng |
-| Frontend bị CORS | Mặc định chỉ cho `http://localhost:5173` và `http://127.0.0.1:5173`; cập nhật danh sách origin trong `src/app.js` nếu dùng địa chỉ khác |
+| Frontend bị CORS | Xem cấu hình CORS trên Render bên dưới; dùng `CORS_ORIGINS` để bổ sung origin khớp chính xác, sau đó redeploy |
 | PowerShell chặn `npm.ps1` | Dùng `npm.cmd ci` và `npm.cmd run dev` |
 
 Với Android emulator, địa chỉ truy cập máy host thường là `http://10.0.2.2:5000`. Với điện thoại thật, dùng IP LAN của máy chạy backend, cùng mạng Wi-Fi và cho phép cổng backend qua firewall.
@@ -529,7 +529,7 @@ Typical request flow: `Route -> Middleware -> Controller -> Service -> Repositor
 | `npm ci` | Install dependencies from `package-lock.json` |
 | `npm run dev` | Start with Nodemon and restart on code changes |
 | `npm start` | Start with Node.js, without automatic reload |
-| `npm test` | Run the Node test runner; this version has no automated test files |
+| `npm test` | Run the Node test runner against test files present in the local checkout |
 
 The project runs JavaScript directly and has no `npm run build` step.
 
@@ -545,33 +545,100 @@ The project runs JavaScript directly and has no `npm run build` step.
 | `400 Bad Request` | Match the Swagger body/query schema, use valid IDs and avoid unsupported fields |
 | `409 Conflict` | Check the current order/payment state and the error message before retrying |
 | `EADDRINUSE` | Change `PORT` in `.env` or stop the process using that port |
-| Browser CORS error | Only `http://localhost:5173` and `http://127.0.0.1:5173` are allowed by default; update the origins in `src/app.js` for another frontend URL |
+| Browser CORS error | See Render CORS configuration below; add exact extra origins with `CORS_ORIGINS` and redeploy |
 | PowerShell blocks `npm.ps1` | Use `npm.cmd ci` and `npm.cmd run dev` |
 
 An Android emulator typically reaches the host at `http://10.0.2.2:5000`. On a physical phone, use the backend computer's LAN IP, connect to the same Wi-Fi network and allow the backend port through the firewall.
 
-## Cấu hình CORS trên Render
+## Cấu hình CORS trên Render / Render CORS configuration
 
-Đặt biến môi trường sau trong Render → Environment:
+The exact default allowlist in `src/app.js` contains:
 
-```env
-CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173,https://furniturehub-web-uu6q.vercel.app,https://furniturehub-mobile-git-dev-danghoangtrucvys-projects.vercel.app
+- `http://localhost:5173`
+- `http://127.0.0.1:5173`
+- `http://localhost:8081`
+- `https://furniturehub-web-uu6q.vercel.app`
+- `https://furniturehub-mobile.vercel.app`
+- `https://furniturehub-mobile-git-dev-danghoangtrucvys-projects.vercel.app`
+
+No CORS environment variable is required for these clients. The existing
+`CORS_ORIGINS` variable now **adds** exact origins to these defaults instead of
+replacing them, so an older Render value cannot remove a supported frontend.
+Keep any additional legitimate origins already configured. Optional example:
+
+```dotenv
+CORS_ORIGINS=https://your-additional-frontend.example
 ```
 
-Nếu không khai báo, backend dùng bốn origin trên làm mặc định. Khi khai báo,
-`CORS_ORIGINS` thay thế toàn bộ danh sách mặc định. Các mục được tách bằng dấu
-phẩy, bỏ khoảng trắng, mục rỗng và trùng lặp; origin phải khớp chính xác.
-Không dùng `*` hoặc cho phép toàn bộ domain Vercel. Cấu hình không bật cookie
-credentials; JWT tiếp tục được gửi bằng `Authorization: Bearer <token>`.
-CORS chạy trước JSON parser và routes; preflight hợp lệ được xử lý trước JWT.
-CORS chỉ kiểm soát quyền đọc phản hồi của trình duyệt, không thay thế xác thực.
+Use comma-separated origins without paths or trailing slashes. Whitespace,
+empty entries and duplicates are ignored. Empty or unset `CORS_ORIGINS` keeps
+the defaults. Do not use `*` or permit all Vercel deployments. `CLIENT_URL`,
+`FRONTEND_URL`, `CORS_ORIGIN` and `ALLOWED_ORIGINS` are not read by this project.
+`NODE_ENV` does not select the allowlist.
 
-Render tiếp tục dùng `PORT` do nền tảng cấp. Kiểm tra cấu hình hiện có là
-`DB_MODE=atlas`, `MONGODB_URI_ATLAS` và `JWT_SECRET` đã được thiết lập; không
-đưa giá trị bí mật vào repository hoặc log. Không có thay đổi kết nối database.
-Sau khi thay đổi được duyệt và triển khai bằng quy trình Git hiện có, lưu biến
-môi trường và redeploy service. Kiểm tra GET `/api/categories`, `/api/products`,
-`/api/products?limit=100` và OPTIONS với Origin production; phản hồi phải có
-`Access-Control-Allow-Origin` đúng origin, preflight hỗ trợ `Authorization`.
-Kiểm tra thêm origin lạ không nhận header cho phép và API bảo vệ vẫn trả 401
-khi thiếu JWT. Kiểm thử local không xác nhận bản production đã được sửa.
+The single CORS middleware remains before the JSON parser, routes, JWT checks
+and error handlers. It handles preflight for all routes automatically, as
+documented by the [Express CORS middleware](https://expressjs.com/en/resources/middleware/cors/).
+Allowed methods are `GET, POST, PUT, PATCH, DELETE, OPTIONS`; allowed request
+headers are `Content-Type, Authorization`. Authentication uses
+`Authorization: Bearer <token>`; cookie credentials remain disabled.
+Unknown origins receive no CORS permission headers. CORS controls browser
+response access and does not replace authentication or block non-browser clients.
+
+### Render deployment
+
+There is no Render blueprint, container or proxy configuration checked into this
+repository. Dashboard settings and current environment values must be checked in
+Render. Use `npm ci` as the build command and `npm start` as the start command.
+`server.js` loads dotenv before importing the app; Render environment variables
+take precedence over `.env`. The HTTP listener starts after MongoDB connects.
+
+Preserve the existing production secrets and settings:
+
+| Variable | Render value |
+| --- | --- |
+| `DB_MODE` | `atlas` for the existing Atlas deployment |
+| `MONGODB_URI_ATLAS` | Existing private MongoDB Atlas connection URI |
+| `JWT_SECRET` | Existing private signing secret; do not rotate for this fix |
+| `JWT_EXPIRES_IN` | Preserve the existing value; defaults to `7d` |
+| `PORT` | Provided by Render; the server uses it automatically |
+| `NODE_ENV` | `production` recommended; not required for this CORS fix |
+| `CORS_ORIGINS` | Optional additional exact origins; defaults above always remain |
+
+Deploy the backend commit containing this fix to the branch configured in Render,
+then redeploy the service. No frontend changes are required. A local test pass
+does not mean the production service has been updated.
+
+### Verification
+
+Local regression checks exercised real Express routes, validators, services,
+bcrypt and JWT with persistence fixtures, without MongoDB or real account creation.
+The test files are kept locally and are not committed; `npm test` only runs test
+files present in your checkout. The checks covered all six default origins,
+required methods/headers, every documented
+API preflight, extra/stale/empty environment values, unauthorized origins,
+registration/login/cart, catalog responses, authorization and error responses.
+These tests do not verify MongoDB connectivity or complete order/payment flows.
+
+After deployment, run this for **each** production frontend origin, then repeat
+with `https://untrusted.example` to confirm no allow-origin header is returned:
+
+```bash
+curl -i -X OPTIONS https://furniturehub-server.onrender.com/api/auth/register \
+  -H 'Origin: https://furniturehub-mobile.vercel.app' \
+  -H 'Access-Control-Request-Method: POST' \
+  -H 'Access-Control-Request-Headers: content-type,authorization'
+```
+
+Allowed preflight must return `204` with `Access-Control-Allow-Origin` equal to
+the requested origin, `Access-Control-Allow-Methods` including `POST`, and
+`Access-Control-Allow-Headers` including `Content-Type` and `Authorization`.
+In PowerShell use `curl.exe` and put the command on one line.
+
+Also check `OPTIONS /api/cart` with requested method `GET` and header
+`authorization`. Actual `GET /api/cart` without a token must still return `401`
+with the correct CORS header for either frontend. Check `GET /api/products`,
+`GET /api/products?limit=100` and `GET /api/categories` with both Origin headers.
+Use an authorized test account to verify login and authenticated cart access in
+each deployed frontend. Test registration only with approval to create a real
+production account; preflight alone does not verify successful registration.

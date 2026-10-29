@@ -71,14 +71,21 @@ const app = express();
 
 /**
  * Giới hạn quyền truy cập từ trình duyệt bằng danh sách origin khớp chính xác.
- * CORS_ORIGINS thay thế danh sách mặc định; bỏ khoảng trắng, giá trị rỗng và trùng lặp.
+ * CORS_ORIGINS bổ sung origin; không loại bỏ các frontend được hỗ trợ mặc định.
  */
 const allowedOrigins = new Set(
-  (process.env.CORS_ORIGINS ??
-    "http://localhost:5173,http://127.0.0.1:5173,https://furniturehub-web-uu6q.vercel.app,https://furniturehub-mobile-git-dev-danghoangtrucvys-projects.vercel.app")
-    .split(",")
-    .map((origin) => origin.trim())
-    .filter(Boolean)
+  [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:8081",
+    "https://furniturehub-web-uu6q.vercel.app",
+    "https://furniturehub-mobile.vercel.app",
+    "https://furniturehub-mobile-git-dev-danghoangtrucvys-projects.vercel.app",
+    ...(process.env.CORS_ORIGINS ?? "")
+      .split(",")
+      .map((origin) => origin.trim())
+      .filter(Boolean),
+  ]
 );
 
 /**
